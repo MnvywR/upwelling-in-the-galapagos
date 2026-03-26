@@ -13,3 +13,7 @@ The file "galap.nc" references to the data from NOAA of the real bathymetry for 
 Below is an image of the Galapagos Island real bathymetry used:
 
 <img width="891" height="694" alt="island bathymetry" src="https://github.com/user-attachments/assets/3ade1f7e-fd43-4b83-9034-299014a384e0" />
+
+Updated visualizations from the beginning to the present is in the google drive below:
+
+https://drive.google.com/drive/folders/1voDzDz1EI2n8msJn_OiSJhYe27yYV5BY?usp=sharing 
