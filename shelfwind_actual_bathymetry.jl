@@ -26,7 +26,8 @@
     using Printf
     using Oceananigans: Callback, IterationInterval
     using Oceanostics.ProgressMessengers: SingleLineMessenger 
-    
+    using CairoMakie
+
 
     # Bathymetry switch
     bathymetry_mode = 1   # 1 = real bathymetry
@@ -62,35 +63,58 @@
     nx = length(lon)
     nz = length(lat)
 
-    depth = reshape(zflat, nx, nz)'  # reshape to 2D grid (lat × lon)
+    depth = reshape(zflat, nx, nz) # reshape to 2D grid (lat × lon)
+    
+    
+    println("Fixed depth size: ", size(depth))  # should be (1001, 601)
+    fig1 = Figure(resolution=(900,700))
+    ax = Axis(fig1[1,1], xlabel="Longitude", ylabel="Latitude",
+            title="Full Galapagos Bathymetry")
 
+    heatmap!(ax, lat, lon, depth')  # transpose for plotting only
 
+    display(fig1)
+
+ #=
     # Desired island topography longtiudes and latitudes
     lon_min = -92.0
     lon_max = -89.0
-    lat_min = -1.2
-    lat_max =  1
+    lat_min = -2.5
+    lat_max =  .5
 
     ilon = findall(lon .>= lon_min .&& lon .<= lon_max)
     ilat = findall(lat .>= lat_min .&& lat .<= lat_max)
 
     lon_crop = lon[ilon]
     lat_crop = lat[ilat]
-    depth_crop = depth[ilat, ilon]
+    depthcrop = depth[ilat, ilon]'
 
 
-    Lx_real = (maximum(lon_crop) - minimum(lon_crop)) * 111e3
-    Ly_real = (maximum(lat_crop) - minimum(lat_crop)) * 111e3
+    println("cropped depth size: ", size(depthcrop))  # should be (1001, 601)
+    fig2 = Figure(resolution=(900,700))
+    ax = Axis(fig2[1,1], xlabel="Longitude", ylabel="Latitude",
+            title="Cropped Galapagos Bathymetry")
+
+    heatmap!(ax, lon_crop, lat_crop, depthcrop)
+
+    display(fig2)
+
+=#
+
+
+    Lx_real = (maximum(lon) - minimum(lon)) * 111e3
+    Ly_real = (maximum(lat) - minimum(lat)) * 111e3
 
     itp = extrapolate(
-        interpolate((lat_crop, lon_crop), depth_crop, Gridded(Linear())),
+        interpolate((lat, lon), collect(depth'), Gridded(Linear())),
         Interpolations.Flat()
     )
 
     deg_per_meter = 1 / 111e3
 
-    lon_from_x(x) = minimum(lon_crop) + x * deg_per_meter
-    lat_from_y(y) = minimum(lat_crop) + y * deg_per_meter
+    lon_from_x(x) = minimum(lon) + x * deg_per_meter
+    lat_from_y(y) = minimum(lat) + (y + Ly_real/2) * deg_per_meter
+
 
     bottom(x, y) = itp(lat_from_y(y), lon_from_x(x))
 
@@ -142,7 +166,7 @@
     Umaxᵥ = 0.5 #m/s
     zₒᵥ = -75 #m 
     yₒᵥ = 0 #m
-    σ_zᵥ = 25 #m #change to around 20 ish
+    σ_zᵥ = 20 #m #change to around 20 ish
     σ_yᵥ = 55600 #0.5 * pi/180 * (6.371*10^6) #m = 55,600 meters #divide by two 
 
     U₁(y) = exp(-(y-yₒᵥ)^2/(2*σ_yᵥ^2))
@@ -215,6 +239,7 @@
 
     #surface wind stresses
 
+  
     cᴰ = 2.5e-3 # dimensionless drag coefficient
     ρₐ = 1.225  # kg m⁻³, average density of air at sea-level
     ρₒ = 1028   # kg m⁻³, average density of seawater
@@ -229,11 +254,11 @@
     # x₁ₘₒ = @allowscalar xnodes(grid, Center())[1] # Closest grid center to the bottom
     # cᴰ = (κ / log(x₁ₘₒ/params.ℓ₀))^2 # Drag coefficient
 
-        @inline drag_u(x, y, t, u, v, p) = - cᴰ * √(u^2 + v^2) * u
-        @inline drag_v(x, y, t, u, v, p) = - cᴰ * √(u^2 + v^2) * v
+        @inline drag_u(x, y, t, u, v, p) = - p.cᴰ * √(u^2 + v^2) * u
+        @inline drag_v(x, y, t, u, v, p) = - p.cᴰ * √(u^2 + v^2) * v
 
         drag_bc_u = FluxBoundaryCondition(drag_u, field_dependencies=(:u, :v), parameters=(; cᴰ=cᴰ,))
-        drag_bc_v = FluxBoundaryCondition(drag_v, field_dependencies=(:v, :v), parameters=(; cᴰ=cᴰ,))
+        drag_bc_v = FluxBoundaryCondition(drag_v, field_dependencies=(:u, :v), parameters=(; cᴰ=cᴰ,))
     end
     #----
 
@@ -270,7 +295,6 @@
     @inline sponge_T(x, y, z, t, T, p) = -east_mask(x, y, z) / p.σ * (T - Teast(z, p))-west_mask(x, y, z) / p.σ * (T - (Twest(z, p))) # nudges T to T∞
     @inline sponge_S(x, y, z, t, S, p) = -east_mask(x, y, z) / p.σ * (S - Seast(x, y, z, p))-west_mask(x, y, z) / p.σ * (S - (Swest(x, y, z, p))) # nudges S to S∞
     @inline sponge_u(x, y, z, t, u, p) = -east_mask(x, y, z) / p.σ * (u - Ueast(y, z, p))-west_mask(x, y, z) / p.σ * (u - (Uwest(y, z, p))) # nudges S to S∞
-
     #----
 
     #++++ Assembling forcings and BCs
@@ -278,6 +302,7 @@
     FT = Forcing(sponge_T, field_dependencies = :T, parameters = params)
     FS = Forcing(sponge_S, field_dependencies = :S, parameters = params)
     FU = Forcing(sponge_u, field_dependencies = :u, parameters = params)
+
     forcing = (T=FT, S=FS, u = FU)
 
     #Flux boundary conditions -> Value '''' and turned on west and east for Tbcs/Sbcs
@@ -291,16 +316,26 @@
                                     #west = ValueBoundaryCondition(35),  
                                     #east = ValueBoundaryCondition(35), # Hidden behind sponge layer
                                     )
-    u_bcs = FieldBoundaryConditions(#west = ValueBoundaryCondition(0.3),  
+    
+    u_bcs = FieldBoundaryConditions(
+        #top    = FluxBoundaryCondition(Qu),   # wind stress
+        #bottom = drag_bc_u,                       # bottom drag
+    )
+    v_bcs = FieldBoundaryConditions(
+        #top    = FluxBoundaryCondition(Qv),   # wind stress
+        #bottom = drag_bc_v,                       # bottom drag
+    )
+
+    #u_bcs = FieldBoundaryConditions(#west = ValueBoundaryCondition(0.3),  
                                     #east = ValueBoundaryCondition(0.3)
                                     #top = FluxBoundaryCondition(Qu),  # wind stress
                                     #bottom = drag_bc_u, # # bottom = drag_bc_u, #must change to quadratic function
-                                    )
-    v_bcs = FieldBoundaryConditions(#top = FluxBoundaryCondition(Qv),  # wind stress
+                                   # )
+    #v_bcs = FieldBoundaryConditions(#top = FluxBoundaryCondition(Qv),  # wind stress
                                     #bottom = drag_bc_v,
                                 # east = ValueBoundaryCondition(0),
                                 # west = ValueBoundaryCondition(0),
-                                    )
+                                 #   )
     w_bcs = FieldBoundaryConditions(#east = ValueBoundaryCondition(0),
                                     #west = ValueBoundaryCondition(0),
                                     )
@@ -349,7 +384,7 @@
 
     Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
     simulation = Simulation(model, Δt=Δt₀,
-                            stop_time = 10days, # when to stop the simulation
+                            stop_time = 50days, # when to stop the simulation
     )
 
   
@@ -380,9 +415,29 @@
 
     if interpolated_IC
 
-        filename = "IC_part.nc"
+        filename = "IC_real_bathymetry_1year.nc"
         @info "Imposing initial conditions from existing NetCDF file $filename"
+        
+        ds_ic = NCDataset(filename)
 
+        # Read the last time snapshot of each variable
+        u_data = ds_ic["u"][:, :, :, end]
+        v_data = ds_ic["v"][:, :, :, end]
+        w_data = ds_ic["w"][:, :, :, end]
+        T_data = ds_ic["T"][:, :, :, end]
+        S_data = ds_ic["S"][:, :, :, end]
+
+        close(ds_ic)
+
+        # Replace NaNs (land/immersed cells) with 0
+        replace!(u_data, NaN => 0.0)
+        replace!(v_data, NaN => 0.0)
+        replace!(w_data, NaN => 0.0)
+        replace!(T_data, NaN => 0.0)
+        replace!(S_data, NaN => 0.0)
+
+        set!(model, u=u_data, v=v_data, w=w_data, T=T_data, S=S_data) 
+        #=
         using Rasters
         rs = RasterStack(filename, name=(:u, :v, :w, :T, :S))
 
@@ -392,7 +447,7 @@
 
         @allowscalar S[1:grid.Nx, 1:grid.Ny, 1:grid.Nz] .= CuArray(rs.S[ Ti=Near(Inf) ])
         @allowscalar T[1:grid.Nx, 1:grid.Ny, 1:grid.Nz] .= CuArray(rs.T[ Ti=Near(Inf) ])
-
+        =#
     else
         @info "Imposing initial conditions from scratch"
 
@@ -414,27 +469,8 @@
         vᵢ = fill(0.0, size(v))
         wᵢ = fill(0.0, size(w))
 
-        #uᵢ .-= mean(uᵢ)
-        #vᵢ .-= mean(vᵢ)
-        #wᵢ .-= mean(wᵢ)
-        #uᵢ .+= 0 #params.u_b
-        #vᵢ .+= -.25 #-0.2 #params.v_b    
 
-    
-    #    plumewidth(x)=.0833*x;
-    #    umax=.04
-    
-    #function u_ic(x, y, z)
-
-    #    if z > Lz-plumewidth(x)
-    #        return 5.77*x*umax*(1-(Lz-z)/plumewidth(x))^6*((Lz-z)/plumewidth(x))^(1/2)
-    #    else
-    #        return 0.0
-    #    end
-    #end
-        
-    # uᵢ .+=  u_ic(x,y,z)
-
+      
         set!(model, T=T_ic, S=S_ic, u=uᵢ, v=vᵢ, w=wᵢ)
     end
     #----
@@ -538,7 +574,9 @@
     KE_w = Field(@at (Center, Center, Center) 0.5 * w^2)
 
     KE_total = Field(@at (Center, Center, Center) 0.5 * (u^2 + v^2 + w^2))
-
+    
+    Δz = params.Lz / params.Nz          # ≈ 16.7m per cell  
+    k_75m = Int(round((params.Lz - 75) / Δz))  # how many cells up from bottom  
 
     simulation.output_writers[:surface_slice_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); filename = joinpath(rundir, "top_real.nc"),
@@ -550,9 +588,21 @@
                         schedule=TimeInterval(8640seconds), indices=(:, Int(params.Ny/2), :), 
                         overwrite_existing = overwrite_existing)    
 
+    simulation.output_writers[:xy_75_depth_writer] =
+        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); filename = joinpath(rundir, "upwelling_75m.nc"),
+                        schedule=TimeInterval(8640seconds), indices=(:, :, k_75m),
+                            overwrite_existing = overwrite_existing)
+                            
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
 
-
+    #=
+        # Save a snapshot at the very end for use as IC
+    simulation.output_writers[:IC_writer] =
+        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total);
+                    filename = joinpath(rundir, "IC_real_bathymetry_1year.nc"),
+                    schedule = TimeInterval(365days),  # only saves at the end
+                    overwrite_existing = true)
+    =#
     simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                             schedule = TimeInterval(8640seconds),
                                                             prefix = checkpointer_prefix,
