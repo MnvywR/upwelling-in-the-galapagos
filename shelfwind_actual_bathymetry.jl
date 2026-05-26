@@ -28,11 +28,17 @@
     using Oceanostics.ProgressMessengers: SingleLineMessenger 
     using CairoMakie
 
-
     # Bathymetry switch
     bathymetry_mode = 1   # 1 = real bathymetry
 
+    ds = NCDataset("wind_reg.nc")
 
+    u10 = ds["u10_reg"][:]
+    v10 = ds["v10_reg"][:]
+    lat1 = ds["lat"][:]
+    lon1 = ds["lon"][:]
+
+    close(ds)
     
     #+++ Preamble
     rundir = @__DIR__ # `rundir` will be the directory of this file
@@ -111,9 +117,15 @@
     )
 
     deg_per_meter = 1 / 111e3
-
+    #island_lat = 0
     lon_from_x(x) = minimum(lon) + x * deg_per_meter
-    lat_from_y(y) = minimum(lat) + (y + Ly_real/2) * deg_per_meter
+
+    y_offset = 75000  # meters — tune this until island is centered
+
+    lat_from_y(y) = minimum(lat) + (y + Ly_real/2 - y_offset) * deg_per_meter
+
+
+    #lat_from_y(y) = minimum(lat) + (y + Ly_real/2) * deg_per_meter
 
 
     bottom(x, y) = itp(lat_from_y(y), lon_from_x(x))
@@ -124,14 +136,14 @@
         params = (; Lx = Lx_real,
                 Ly = Ly_real,
                 Lz = 500,
-                Nx = 30,
-                Ny = 30,
-                Nz = 30,
+                Nx = 50,
+                Ny = 50,
+                Nz = 50,
                 ) 
     end
     #changing grid i.e. Nx Ny Nz to 30 30 30 cuz laptop
     if arch == CPU() # If there's no CPU (e.g. if we wanna test shit on a laptop) let's use a smaller number of points!
-        params = (; params..., Nx = 30, Ny = 30, Nz = 30)
+        params = (; params..., Nx = 50, Ny = 50, Nz = 50)
     end
 
 
@@ -319,11 +331,11 @@
     
     u_bcs = FieldBoundaryConditions(
         #top    = FluxBoundaryCondition(Qu),   # wind stress
-        #bottom = drag_bc_u,                       # bottom drag
+        #immersed = drag_bc_u,                       # bottom drag
     )
     v_bcs = FieldBoundaryConditions(
         #top    = FluxBoundaryCondition(Qv),   # wind stress
-        #bottom = drag_bc_v,                       # bottom drag
+        #immersed = drag_bc_v,                       # bottom drag
     )
 
     #u_bcs = FieldBoundaryConditions(#west = ValueBoundaryCondition(0.3),  

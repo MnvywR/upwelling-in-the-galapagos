@@ -52,9 +52,9 @@
         params = (; Lx = 100e4,
                 Ly = 500e3,
                 Lz = 500,
-                Nx = 30,
-                Ny = 30,
-                Nz = 30,
+                Nx = 50,
+                Ny = 50,
+                Nz = 50,
                 ) 
 
     else
@@ -68,7 +68,7 @@
     end
     #changing grid i.e. Nx Ny Nz to 30 30 30 cuz laptop
     if arch == CPU() # If there's no CPU (e.g. if we wanna test shit on a laptop) let's use a smaller number of points!
-        params = (; params..., Nx = 30, Ny = 30, Nz = 30)
+        params = (; params..., Nx = 50, Ny = 50, Nz = 50)
     end
 
 
@@ -86,7 +86,7 @@
 
     #Bathymetry of Galapagos
     #height of 500 m, 250km mean, 3e4 (30 km STD, w
-    bottom(x,y) = -500 + 500 * exp( -(x-params.Lx/2)^2/(2*(3e4)^2) )* exp(-(y-0)^2/(2*(3e4)^2))
+    bottom(x,y) = -500 + 560 * exp( -(x-params.Lx/2)^2/(2*(3e4)^2) )* exp(-(y-0)^2/(2*(3e4)^2))
 
     grid = ImmersedBoundaryGrid(underlying_grid, GridFittedBottom(bottom))
 
@@ -314,7 +314,7 @@
 
     Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
     simulation = Simulation(model, Δt=Δt₀,
-                            stop_time = 100days, # when to stop the simulation
+                            stop_time = 50days, # when to stop the simulation
     )
 
   
@@ -404,13 +404,13 @@
     end
     #----
 
-    #++++ Outputs
+   #++++ Outputs
     @info "Creating output fields"
 
     # y-component of vorticity
     vorticity_z = Field(∂x(v) - ∂y(u))
 
-    outputs = (; u, v, w, T,S,ω_z)
+    outputs = (; u, v, w, T,S,vorticity_z)
 
     if mass_flux
         saved_output_prefix = "iceplume"
@@ -442,7 +442,7 @@
                         overwrite_existing = overwrite_existing)    
 =#
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
-
+#=
     uv = Field((@at (Center, Center, Center) u*v))
     uw = Field((@at (Center, Center, Center) u*w))
     vw = Field((@at (Center, Center, Center) v*w))
@@ -496,39 +496,41 @@
     SP_y_yavg = Average(SP_y, dims=(2))
     #PR_z_yavg = Average(PR_z, dims=(2))
     SP_z_yavg = Average(SP_z, dims=(2))
-
+=#
     #Kinetic energy calculation for u, v, w
     KE_u = Field(@at (Center, Center, Center) 0.5 * u^2)
     KE_v = Field(@at (Center, Center, Center) 0.5 * v^2)
     KE_w = Field(@at (Center, Center, Center) 0.5 * w^2)
 
     KE_total = Field(@at (Center, Center, Center) 0.5 * (u^2 + v^2 + w^2))
-
-    KE_output_fields = (; KE_u, KE_v, KE_w, KE_total, KE_yavg, ε_yavg, ∫KE, ∫ε, ∫εᴰ, εᴰ_yavg, TKE_yavg, SP_x_yavg, SP_y_yavg, SP_z_yavg  )
+    
+    Δz = params.Lz / params.Nz          # ≈ 16.7m per cell  
+    k_75m = Int(round((params.Lz - 75) / Δz))  # how many cells up from bottom  
 
     simulation.output_writers[:surface_slice_writer] =
-        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); filename = joinpath(rundir, "top.nc"),
+        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); filename = joinpath(rundir, "top_real.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, params.Nz),
                             overwrite_existing = overwrite_existing)
     #same with below from indicies(:, round (params.NY/2),:)
     simulation.output_writers[:y_slice_writer] =
-        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); filename= joinpath(rundir, "midy.nc"),
+        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); filename= joinpath(rundir, "midy_real.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, Int(params.Ny/2), :), 
                         overwrite_existing = overwrite_existing)    
 
+    simulation.output_writers[:xy_75_depth_writer] =
+        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); filename = joinpath(rundir, "upwelling_75m.nc"),
+                        schedule=TimeInterval(8640seconds), indices=(:, :, k_75m),
+                            overwrite_existing = overwrite_existing)
+                            
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
 
-
-    simulation.output_writers[:nc] = NetCDFWriter(model, KE_output_fields;
-                                                        filename = joinpath(rundir, "KE_info.nc"),
-                                                        schedule = TimeInterval(8640seconds),
-                                                        overwrite_existing = overwrite_existing)
-    #=                                                    
-    simulation.output_writers[:nQ] = NetCDFWriter(model, (; Q=Q_inv);
-                                                        filename = joinpath(rundir, "Q.nc"),
-                                                        schedule = TimeInterval(8640seconds),
-                                                        overwrite_existing = overwrite_existing)
-
+    #=
+        # Save a snapshot at the very end for use as IC
+    simulation.output_writers[:IC_writer] =
+        NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total);
+                    filename = joinpath(rundir, "IC_real_bathymetry_1year.nc"),
+                    schedule = TimeInterval(365days),  # only saves at the end
+                    overwrite_existing = true)
     =#
     simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                             schedule = TimeInterval(8640seconds),
@@ -541,4 +543,3 @@
     #+++ Ready to press the big red button: 
     run!(simulation; pickup=false) 
     #---
-

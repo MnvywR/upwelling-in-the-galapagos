@@ -21,9 +21,9 @@ nt = length(time);
 
 %% ---- Color limits ----
 Tlims    = [6 28];
-Slims    = [33 35.5];
-KElims   = [0 0.5];
-VORTlims = [-3e-6 3e-6];
+Slims    = [34 35.5];
+KElims   = [0 0.3];
+VORTlims = [-4e-6 4e-6];
 
 %% ---- Video setup ----
 vid = VideoWriter('shelfwind_full_visualization.mp4','MPEG-4');
