@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 %% ==========================================
 % Shelfwind Visualization Movie
 % T, S, KE, and Vorticity
@@ -174,4 +175,5 @@ for it = 1:nt
 end
 
 close(vid)
+%% ==========================================
 disp('Movie saved successfully.')
