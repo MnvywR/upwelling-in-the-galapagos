@@ -19,3 +19,13 @@
 /wind_data_regridded.nc
 wind_data_4_years.nc
 wind_data_regridded.nc
+galapagos_netcdf_real_bathymetry/midy_real_bathymetry_no_wind_GPU.nc
+galapagos_netcdf_real_bathymetry/top_real_bathymetry_no_wind_GPU.nc
+galapagos_netcdf_real_bathymetry/upwelling_75m_real_bathymetry_no_wind_GPU.nc
+# NetCDF output folders (all bathymetry modes)
+galapagos_netcdf_no_bathymetry/
+galapagos_netcdf_gaussian_bathymetry/
+galapagos_netcdf_real_bathymetry/
+
+# Loose .nc files in root
+*.nc

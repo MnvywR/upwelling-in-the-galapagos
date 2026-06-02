@@ -5,11 +5,34 @@
 % Surface + Mid-y Sections
 %% ==========================================
 
-clear; close all;
-addpath('cmocean')
+%% ==========================================
+%%CONTROL SWITCH
 
-file_top  = 'top_real_GPU.nc';
-file_midy = 'midy_real_GPU.nc';
+bathymetry_mode = 2;  % 0 = no_bathymetry, 1 = gaussian_bathymetry, 2 = real_bathymetry
+
+wind = 0;             % 0 = nowind, 1 = wind
+
+%% ==========================================
+
+if bathymetry_mode == 0
+    bathy_tag    = 'no_bathymetry';
+    bathy_folder = 'galapagos_netcdf_no_bathymetry';
+elseif bathymetry_mode == 1
+    bathy_tag    = 'gaussian_bathymetry';
+    bathy_folder = 'galapagos_netcdf_gaussian_bathymetry';
+elseif bathymetry_mode == 2
+    bathy_tag    = 'real_bathymetry';
+    bathy_folder = 'galapagos_netcdf_real_bathymetry';
+end
+
+if wind == 0
+    wind_tag = 'no_wind';
+elseif wind == 1
+    wind_tag = 'wind';
+end
+
+file_top  = fullfile(bathy_folder, sprintf('top_%s_%s_GPU.nc',  bathy_tag, wind_tag));
+file_midy = fullfile(bathy_folder, sprintf('midy_%s_%s_GPU.nc', bathy_tag, wind_tag));
 
 %% ---- Load coordinates ----
 x    = ncread(file_top,  'x_caa')/1000;

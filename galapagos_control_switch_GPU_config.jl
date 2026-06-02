@@ -24,7 +24,7 @@
     #CONTROL BOARD
     
     # Bathymetry switch
-    bathymetry_mode = 1   # 0 = No bathymetry, 1 = Gaussian bathymetry, 2 = Real bathymetry
+    bathymetry_mode = 2   # 0 = No bathymetry, 1 = Gaussian bathymetry, 2 = Real bathymetry
     
     #wind switch
     wind = 0
@@ -33,7 +33,7 @@
 
 
     if wind==0
-        println("no wind being used")
+        @info "no wind being used"
     elseif wind==1
         
         @info "loading four years of wind data from netCDF file"
@@ -461,34 +461,41 @@
 
     if bathymetry_mode == 0
         bathy_tag = "no_bathymetry"
+        bathy_folder = "galapagos_netcdf_no_bathymetry"
     elseif bathymetry_mode == 1
         bathy_tag = "gaussian_bathymetry"
+        bathy_folder = "galapagos_netcdf_gaussian_bathymetry"
     elseif bathymetry_mode == 2
         bathy_tag = "real_bathymetry"
+        bathy_folder = "galapagos_netcdf_real_bathymetry"
     end
     
     if wind == 0   
-        windtag = "nowind"
+        windtag = "no_wind"
     elseif wind == 1
         windtag = "wind"
     end
 
+    #create a folder for the netCDF outputs if it doesn't already exist
+    output_dir = joinpath(rundir, bathy_folder)
+    mkpath(output_dir)  
+
     simulation.output_writers[:surface_slice_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename = joinpath(rundir, "top_$(bathy_tag)_$(windtag)_GPU.nc"),
+        filename = joinpath(output_dir, "top_$(bathy_tag)_$(windtag)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, params.Nz),
                             overwrite_existing = overwrite_existing)
 
     #same with below from indicies(:, round (params.NY/2),:)
     simulation.output_writers[:y_slice_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename= joinpath(rundir, "midy_$(bathy_tag)_$(windtag)_GPU.nc"),
+        filename= joinpath(output_dir, "midy_$(bathy_tag)_$(windtag)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, Int(params.Ny/2), :), 
                         overwrite_existing = overwrite_existing)    
 
     simulation.output_writers[:xy_75_depth_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename = joinpath(rundir, "upwelling_75m_$(bathy_tag)_$(windtag)_GPU.nc"),
+        filename = joinpath(output_dir, "upwelling_75m_$(bathy_tag)_$(windtag)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, k_75m),
                             overwrite_existing = overwrite_existing)
                             
