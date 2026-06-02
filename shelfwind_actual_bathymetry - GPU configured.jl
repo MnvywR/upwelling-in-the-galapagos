@@ -455,14 +455,13 @@
                             
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
 
-    #=
-        # Save a snapshot at the very end for use as IC
+    # Save a snapshot at the very end for use as IC
     simulation.output_writers[:IC_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total);
                     filename = joinpath(rundir, "IC_real_bathymetry_1year.nc"),
                     schedule = TimeInterval(365days),  # only saves at the end
-                    overwrite_existing = true)
-    =#
+                    overwrite_existing = overwrite_existing)
+    
     simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                             schedule = TimeInterval(8640seconds),
                                                             prefix = checkpointer_prefix,

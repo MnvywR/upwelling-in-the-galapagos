@@ -26,6 +26,6 @@ galapagos_netcdf_real_bathymetry/upwelling_75m_real_bathymetry_no_wind_GPU.nc
 galapagos_netcdf_no_bathymetry/
 galapagos_netcdf_gaussian_bathymetry/
 galapagos_netcdf_real_bathymetry/
-
+Galapagos_full_visualization.mp4
 # Loose .nc files in root
 *.nc

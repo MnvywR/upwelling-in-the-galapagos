@@ -7,7 +7,7 @@
 %% ==========================================
 %%CONTROL SWITCH
 
-bathymetry_mode = 2;  % 0 = no_bathymetry, 1 = gaussian_bathymetry, 2 = real_bathymetry
+bathymetry_mode = 1;  % 0 = no_bathymetry, 1 = gaussian_bathymetry, 2 = real_bathymetry
 
 wind = 0;             % 0 = nowind, 1 = wind
 
@@ -49,7 +49,14 @@ KElims   = [0 0.3];
 VORTlims = [-4e-6 4e-6];
 
 %% ---- Video setup ----
-vid = VideoWriter('Galapagos_full_visualization.mp4','MPEG-4');
+
+fname = 'Galapagos_full_visualization.mp4';
+
+if exist(fname,'file')
+    delete(fname)
+end
+
+vid = VideoWriter(fname,'MPEG-4');
 vid.FrameRate = 10;
 vid.Quality   = 95;
 open(vid);

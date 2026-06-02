@@ -24,7 +24,7 @@
     #CONTROL BOARD
     
     # Bathymetry switch
-    bathymetry_mode = 2   # 0 = No bathymetry, 1 = Gaussian bathymetry, 2 = Real bathymetry
+    bathymetry_mode = 1   # 0 = No bathymetry, 1 = Gaussian bathymetry, 2 = Real bathymetry
     
     #wind switch
     wind = 0
@@ -67,7 +67,8 @@
 
     if  bathymetry_mode == 0 
         @info "Using no bathymetry (flat bottom)"
-
+        Lx_real = 100e4
+        Ly_real = 500e3
         #Flat bottom
         bottom(x,y) = -500
 
@@ -76,7 +77,9 @@
         @info "Using gaussian bathymetry"
 
         #Gaussian Bathymetry of Galapagos
-        #height of 500 m, 250km mean, 3e4 (30 km STD, w
+        #height of 500 m, 250km mean, 3e4 (30 km STD)
+        Lx_real = 100e4
+        Ly_real = 500e3
         bottom(x,y) = -500 + 560 * exp( -(x-params.Lx/2)^2/(2*(3e4)^2) )* exp(-(y-0)^2/(2*(3e4)^2))
 
     elseif bathymetry_mode == 2
@@ -344,7 +347,7 @@
 
     Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
     simulation = Simulation(model, Δt=Δt₀,
-                            stop_time = 100days, # when to stop the simulation
+                            stop_time = 10days, # when to stop the simulation
     )
 
   
@@ -501,14 +504,14 @@
                             
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
 
-    #=
+    
         # Save a snapshot at the very end for use as IC
     simulation.output_writers[:IC_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total);
-                    filename = joinpath(rundir, "IC_real_bathymetry_1year.nc"),
+                    filename = joinpath(output_dir, "IC_$(bathy_tag)_$(windtag)_GPU.nc"),
                     schedule = TimeInterval(365days),  # only saves at the end
-                    overwrite_existing = true)
-    =#
+                    overwrite_existing = overwrite_existing)
+    
     simulation.output_writers[:checkpointer] = Checkpointer(model,
                                                             schedule = TimeInterval(8640seconds),
                                                             prefix = checkpointer_prefix,
