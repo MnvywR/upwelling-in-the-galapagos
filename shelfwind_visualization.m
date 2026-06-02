@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 %% ==========================================
 % Shelfwind Visualization Movie
 % T, S, KE, and Vorticity
@@ -50,7 +49,7 @@ KElims   = [0 0.3];
 VORTlims = [-4e-6 4e-6];
 
 %% ---- Video setup ----
-vid = VideoWriter('shelfwind_full_visualization.mp4','MPEG-4');
+vid = VideoWriter('Galapagos_full_visualization.mp4','MPEG-4');
 vid.FrameRate = 10;
 vid.Quality   = 95;
 open(vid);
