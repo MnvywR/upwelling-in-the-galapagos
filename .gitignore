@@ -17,3 +17,5 @@
 /upwelling_75m_GPU.nc
 /wind_analysis.jl
 /wind_data_regridded.nc
+wind_data_4_years.nc
+wind_data_regridded.nc
