@@ -4,6 +4,9 @@
     using FFTW
     using Dates
     using Statistics
+    #----------------------
+    #importing monthly data
+    #----------------------
 
     monthly_data = NCDataset("eastward_sea_velocity.nc")
     var_names = keys(monthly_data)
@@ -32,7 +35,83 @@
 
     plot1 = Plots.plot(new_data, title="Eastward Sea Velocity at 75m depth, 95W, 0.33N", xlabel="Time (months)", ylabel="Velocity (m/s)")
     display(plot1)
+    #----------------------
+    #FFT of monthly data
+    #----------------------
 
+    # clean monthly data (new_data is still Union{Missing,Float32})
+    monthly_time = monthly_data["time"][:]
+    u_monthly    = Float64.(coalesce.(new_data, mean(skipmissing(new_data))))
+
+    N_m      = length(u_monthly)
+    fs_m     = 1.0                          # 1 sample per month
+    freqs_m  = (0:N_m-1) * (fs_m / N_m)   # cycles per month
+
+    U_modes_m = fft(u_monthly .- mean(u_monthly))
+
+    # find top wave modes (skip k=0 DC component at index 1)
+    top_n          = 1
+    power_m        = abs.(U_modes_m[2:div(N_m,2)]).^2
+    top_idx_m      = sortperm(power_m, rev=true)[1:top_n]
+    top_idx_fft_m  = top_idx_m .+ 1        # shift back for U_modes indexing
+
+    println("Top $top_n monthly modes:")
+    for i in top_idx_fft_m
+        A_i = (2.0/N_m) * abs(U_modes_m[i])
+        f_i = freqs_m[i]
+        T_i = 1.0 / f_i                    # period in months
+        φ_i = angle(U_modes_m[i])
+        println("  period=$(round(T_i, digits=1)) months  ($(round(T_i/12, digits=2)) years)  amplitude=$(round(A_i, digits=4)) m/s")
+    end
+
+    #reconstruct cosine signal using top modes
+    t_m = collect(0:N_m-1)
+    u_reconstructed_monthly = fill(mean(u_monthly), N_m)
+
+    for i in top_idx_fft_m
+        A_i = (2.0/N_m) * abs(U_modes_m[i])
+        f_i = freqs_m[i]
+        φ_i = angle(U_modes_m[i])
+        u_reconstructed_monthly .+= A_i .* cos.(2π .* f_i .* t_m .+ φ_i)
+    end
+
+    # ── variance explained ────────────────────────────────
+    ss_res = sum((u_monthly .- u_reconstructed_monthly).^2)
+    ss_tot = sum((u_monthly .- mean(u_monthly)).^2)
+    println("Variance between actual and reconstructed: $(round((1 - ss_res/ss_tot)*100, digits=1))%")
+
+    # ── plot ──────────────────────────────────────────────
+    plot_monthly_fft = Plots.plot(
+        monthly_time, u_monthly,
+        title  = "EUC Monthly Velocity + top-$top_n modes",
+        xlabel = "Date",
+        ylabel = "Velocity (m/s)",
+        label  = "Original (monthly)",
+        lw     = 1.0, alpha = 0.5, color = :steelblue
+    )
+    Plots.plot!(plot_monthly_fft,
+        monthly_time, u_reconstructed_monthly,
+        label = "Top $top_n modes",
+        lw = 2.0, color = :red
+    )
+    display(plot_monthly_fft)
+
+    # ── power spectrum plot ───────────────────────────────
+    periods_m = 1.0 ./ freqs_m[2:div(N_m,2)]   # months
+    power_plot = abs.(U_modes_m[2:div(N_m,2)]).^2
+
+    plot_spectrum_m = Plots.plot(
+        periods_m, power_plot,
+        seriestype = :sticks,
+        title  = "Monthly Spectrum",
+        xlabel = "Period (months)",
+        ylabel = "magnitude",
+        label  = "magnitude",
+        xlims  = (0, 120),              # 0–10 years
+        lw = 1.5, color = :steelblue
+    )
+    #---------------------
+    #importing daily data
     #---------------------
 
     daily_data = NCDataset("eastward_sea_velocity_daily.nc")
@@ -75,7 +154,7 @@
 
 
     #---------------------
-    #SEE FIRST DOMINANT MODE IN THE FFT
+    #SEE FIRST DOMINANT MODE IN THE FFT FOR DAILY DATA
     #---------------------
     fs = 1.0  # daily sampling
     u_clean = Float64.(coalesce.(new_daily_data, mean(skipmissing(new_daily_data)))) # Clean missing values by replacing with mean
@@ -132,16 +211,17 @@
     #---------------------
     #MULTIPLE DOMINANT MODES
     #---------------------
+
     # Identify top 3 modes
     top_n = 3
 
     # only search first half (positive frequencies, skip k=0 DC at index 1)
     power_onesided = abs.(U_modes[2:div(N,2)]).^2   # skip index 1 (DC)
     top_idx = sortperm(power_onesided, rev=true)[1:top_n]  # indices into power_onesided
-    top_idx_fft = top_idx .+ 1   # shift back to U_modes indexing (since we skipped index 1)
+    top_idx_fft_daily = top_idx .+ 1   # shift back to U_modes indexing (since we skipped index 1)
 
     println("Top $top_n modes:")
-    for i in top_idx_fft
+    for i in top_idx_fft_daily
         A_i = (2.0/N) * abs(U_modes[i])
         f_i = freqs[i]
         T_i = 1.0 / f_i
@@ -154,15 +234,15 @@
     
     u_reconstructed_multi = fill(mean(u_clean), N)   # start with mean
 
-    for i in top_idx_fft
+    for i in top_idx_fft_daily
         A_i = (2.0/N) * abs(U_modes[i])
         f_i = freqs[i]
         φ_i = angle(U_modes[i])
         u_reconstructed_multi .+= A_i .* cos.(2π .* f_i .* t .+ φ_i)
     end
 
-    
-    plot_reconstructed = Plots.plot(
+
+    plot_reconstructed_multi = Plots.plot(
     daily_time[time_indices], u_clean,
     title  = "EUC Velocity + top-$top_n mode reconstruction (2018)",
     xlabel = "Date",
@@ -172,10 +252,19 @@
     alpha  = 0.5,
     color  = :steelblue
     )
-    Plots.plot!(plot_reconstructed,
+    Plots.plot!(plot_reconstructed_multi,        # ← the ! means "add to existing plot"
         daily_time[time_indices], u_reconstructed_multi[:],
         label  = "Top $top_n modes",
         lw     = 2.0,
         color  = :red
     )
-    display(plot_reconstructed)
+    display(plot_reconstructed_multi)
+
+    #variance
+    ss_res_multi = sum((u_clean .- u_reconstructed_multi).^2)
+    ss_tot_multi = sum((u_clean .- mean(u_clean)).^2)
+    println("Variance -----> 1 - residual variance / total variance ")
+    println("Variance between actual and reconstructed by top $top_n modes: $(round((1 - ss_res_multi/ss_tot_multi)*100, digits=1))%")
+
+
+    

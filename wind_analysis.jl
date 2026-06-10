@@ -15,12 +15,6 @@ using Printf
 
 raw_path = "wind_data_4_years.nc"
 
-out_dir  = @__DIR__
-
-# Used only for the 1° binning labels in Approach 4
-lon_min, lon_max = -94.0, -85.0
-lat_min, lat_max =  -3.0,   3.0
-
 # ---------------------------------------------------------------------------
 #  1. LOAD AND RESHAPE
 #  ERA5 sub-region GRIB → CDO → NetCDF stores data as [npts, ntime]
@@ -45,7 +39,6 @@ u10_raw  = read_var(ds, "10u")   # [nlon, nlat, ntime]
 v10_raw  = read_var(ds, "10v")   # [nlon, nlat, ntime]
 lat_raw  = read_var(ds, "lat")   # [nlat]
 lon_raw  = read_var(ds, "lon")   # [nlon]
-time_raw = read_var(ds, "time")  # [ntime]
 close(ds)
 
 nlon  = length(lon_raw)
@@ -74,7 +67,6 @@ V = Float64.(v10_raw)
 spd = sqrt.(U.^2 .+ V.^2)
 dir = atand.(U, V)   # signed: 0=N, 90=E, ±180=S, -90=W
 
-
 println("Done loading. Starting analyses...\n")
 
 # ===========================================================================
@@ -93,8 +85,8 @@ fig1 = Figure(resolution=(1200, 500))
 
 ax1 = Axis(fig1[1,1], xlabel="Longitude (°)", ylabel="Latitude (°)",
            title="Annual mean wind speed (m/s)")
-hm = heatmap!(ax1, lon_reg, lat_reg, spd_mean, colormap=:viridis)
-Colorbar(fig1[1,2], hm, label="Speed (m/s)")
+hm1 = heatmap!(ax1, lon_reg, lat_reg, spd_mean, colormap=:viridis)
+Colorbar(fig1[1,2], hm1, label="Speed (m/s)")
 
 # Overlay wind vectors (subsample ~15 arrows across)
 stride = max(1, div(nlon, 15))
@@ -119,8 +111,7 @@ hm2 = heatmap!(ax2, lon_reg, lat_reg, dir_mean,
                colorrange=(-180, 180))
 Colorbar(fig1[1,4], hm2, label="Direction (°)\n0=N, 90=E, ±180=S, -90=W")
 
-save(joinpath(out_dir, "fig1_time_mean_field.png"), fig1, px_per_unit=2)
-println("  Saved fig1_time_mean_field.png")
+display(fig1)
 
 # ===========================================================================
 #  APPROACH 2:  DOMAIN-AVERAGE TIME SERIES
@@ -132,31 +123,19 @@ spd_domain = [mean(filter(!isnan, vec(spd[:, :, t]))) for t in 1:ntime]
 u_domain   = [mean(filter(!isnan, vec(U[:, :, t])))   for t in 1:ntime]
 v_domain   = [mean(filter(!isnan, vec(V[:, :, t])))   for t in 1:ntime]
 
-
-# Bypass the broken time_raw entirely — construct from known data properties
-using Dates
+# Construct time axis from known data properties
 t_axis = DateTime(2020,1,1,0) .+ Hour.(0:ntime-1)
-xlabel_str = "Date"
 
 fig2 = Figure(resolution=(1100, 500))
-ax = Axis(fig2[1,1], xlabel=xlabel_str,
-          ylabel="Wind (m/s)", title="Domain-averaged wind time series")
-lines!(ax, t_axis, spd_domain, color=:steelblue, label="Speed |V|")
-lines!(ax, t_axis, u_domain,   color=:coral,     label="u (East)")
-lines!(ax, t_axis, v_domain,   color=:seagreen,  label="v (North)")
-hlines!(ax, [0], color=:black, linewidth=0.5, linestyle=:dash)
-axislegend(ax, position=:rt)
+ax_ts = Axis(fig2[1,1], xlabel="Date",
+             ylabel="Wind (m/s)", title="Domain-averaged wind time series")
+lines!(ax_ts, t_axis, spd_domain, color=:steelblue, label="Speed |V|")
+lines!(ax_ts, t_axis, u_domain,   color=:coral,     label="u (East)")
+lines!(ax_ts, t_axis, v_domain,   color=:seagreen,  label="v (North)")
+hlines!(ax_ts, [0], color=:black, linewidth=0.5, linestyle=:dash)
+axislegend(ax_ts, position=:rt)
 
-fig2 = Figure(resolution=(1100, 500))
-ax = Axis(fig2[1,1], xlabel=xlabel_str,
-          ylabel="Wind (m/s)", title="Domain-averaged wind time series")
-lines!(ax, t_axis, spd_domain, color=:steelblue, label="Speed |V|")
-lines!(ax, t_axis, u_domain,   color=:coral,     label="u (East)")
-lines!(ax, t_axis, v_domain,   color=:seagreen,  label="v (North)")
-hlines!(ax, [0], color=:black, linewidth=0.5, linestyle=:dash)
-axislegend(ax, position=:rt)
-save(joinpath(out_dir, "fig2_domain_timeseries.png"), fig2, px_per_unit=2)
-println("  Saved fig2_domain_timeseries.png")
+display(fig2)
 
 # ===========================================================================
 #  APPROACH 3:  DIRECTIONAL ANALYSIS (8 compass sectors)
@@ -165,7 +144,7 @@ println("  Saved fig2_domain_timeseries.png")
 println("=== APPROACH 3: Directional frequency + speed ===")
 
 dirs       = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-dir_domain = atand.(u_domain, v_domain)   # [-180, 180]; mod() below handles negatives fine
+dir_domain = atand.(u_domain, v_domain)   # [-180, 180]
 
 freq         = zeros(8)
 speed_bydir  = [Float64[] for _ in 1:8]
@@ -188,8 +167,7 @@ ax3b = Axis(fig3[1,2], xlabel="Wind direction", ylabel="Mean speed (m/s)",
             title="Mean wind speed by direction", xticks=(1:8, dirs))
 barplot!(ax3b, 1:8, mean_spd_dir, color=:coral, strokecolor=:white, strokewidth=1)
 
-save(joinpath(out_dir, "fig3_directional_analysis.png"), fig3, px_per_unit=2)
-println("  Saved fig3_directional_analysis.png")
+display(fig3)
 
 println("\n  Compass | Frequency | Mean speed")
 println("  --------|-----------|----------")
@@ -202,6 +180,10 @@ end
 # ===========================================================================
 
 println("\n=== APPROACH 4: 1-degree spatial binning ===")
+
+# Used only for the 1° binning labels
+lon_min, lon_max = -94.0, -85.0
+lat_min, lat_max =  -3.0,   3.0
 
 lon_1deg = collect(ceil(lon_min):1.0:floor(lon_max))
 lat_1deg = collect(ceil(lat_min):1.0:floor(lat_max))
@@ -246,8 +228,7 @@ ax4b = Axis(fig4[1,3], xlabel="Longitude (°)", ylabel="Latitude (°)",
 hm4b = heatmap!(ax4b, lon_1deg, lat_1deg, spd_1deg_std, colormap=:plasma)
 Colorbar(fig4[1,4], hm4b, label="Std dev (m/s)")
 
-save(joinpath(out_dir, "fig4_1deg_binning.png"), fig4, px_per_unit=2)
-println("  Saved fig4_1deg_binning.png")
+display(fig4)
 
 println("\n  Lon | Lat | Mean spd (m/s) | Std (m/s) | Mean u | Mean v")
 println("  ----|-----|----------------|-----------|--------|-------")
@@ -262,49 +243,43 @@ end
 
 println("\n=== APPROACH 5: Wind direction histogram (1° bins) ===")
 
-# ---- Flatten all grid points × all time steps into one direction vector ----
-# dir was computed as mod.(atand.(U,V), 360)  →  [0, 360)
-# Convert to signed convention: [0,180] stays; (180,360) → subtract 360 → (−180,0)
-dir_flat = filter(!isnan, vec(dir))   # already in [-180, 180]; no conversion needed
+# Flatten all grid points × all time steps into one direction vector
+# dir was computed as atand.(U, V) → already in [-180, 180]
+dir_flat = filter(!isnan, vec(dir))
 
-# ---- Build 1° bins: edges at −180.5, −179.5, …, 180.5 (361 bins) ----
-bin_edges  = -180.5:1.0:180.5                    # 361 edges → 360 bins
-bin_centers = collect(-180.0:1.0:180.0)          # 360 bin centers
+# Build 1° bins: edges at −180.5, −179.5, …, 180.5 (360 bins)
+bin_centers = collect(-180.0:1.0:180.0)   # 361 values → 360 bins between them
 nbins = length(bin_centers)
 
 counts = zeros(Int, nbins)
 for d in dir_flat
-    idx = clamp(round(Int, d) + 181, 1, nbins)  # map degree → 1-based index
+    idx = clamp(round(Int, d) + 181, 1, nbins)
     counts[idx] += 1
 end
 
-freq_dir = counts ./ sum(counts) .* 100          # convert to percentage
+freq_dir = counts ./ sum(counts) .* 100
 
-# ---- Plot ----
-fig7 = Figure(resolution=(1100, 450))
-ax7 = Axis(fig7[1,1],
+fig5 = Figure(resolution=(1100, 450))
+ax5 = Axis(fig5[1,1],
     xlabel = "Wind direction (°)  [−180=S via W, 0=N, ±180=S via E]",
     ylabel = "Frequency (%)",
     title  = "Wind direction distribution — all grid points, all years (1° bins)")
 
-barplot!(ax7, bin_centers, freq_dir,
+barplot!(ax5, bin_centers, freq_dir,
          color = :steelblue, strokecolor = :transparent, gap = 0.0)
 
-# Annotate cardinal directions
 for (deg, label) in [(-180,"S"), (-90,"W"), (0,"N"), (90,"E"), (180,"S")]
-    vlines!(ax7, [deg], color=:black, linewidth=0.8, linestyle=:dash)
-    text!(ax7, deg, maximum(freq_dir)*0.95,
+    vlines!(ax5, [deg], color=:black, linewidth=0.8, linestyle=:dash)
+    text!(ax5, deg, maximum(freq_dir)*0.95,
           text=label, align=(:center, :top), fontsize=11, color=:black)
 end
 
-xlims!(ax7, -180, 180)
-xticks_vals = -180:30:180
-ax7.xticks = (collect(xticks_vals), string.(collect(xticks_vals)))
+xlims!(ax5, -180, 180)
+ax5.xticks = (collect(-180:30:180), string.(collect(-180:30:180)))
 
-save(joinpath(out_dir, "fig7_direction_histogram_1deg.png"), fig7, px_per_unit=2)
-println("  Saved fig7_direction_histogram_1deg.png")
+display(fig5)
 
-# ---- Print top-5 most frequent directions ----
+# Print top-5 most frequent directions
 top5 = sortperm(counts, rev=true)[1:5]
 println("\n  Top 5 most frequent directions:")
 println("  Degree | Count   | Frequency")
