@@ -24,16 +24,21 @@
     #CONTROL BOARD
     
     # Bathymetry switch
-    bathymetry_mode = 1   # 0 = No bathymetry, 1 = Gaussian bathymetry, 2 = Real bathymetry
+    bathymetry_mode = 2   # 0 = No bathymetry, 1 = Gaussian bathymetry, 2 = Real bathymetry
     
     #wind switch
-    wind = 0
+    wind = 0 #0 for no wind, 1 for wind (using 4 years of data from netCDF file)
+
+    #non-beta vs beta switch
+    beta_switch = 1 #0 for no beta, 1 for beta plane
 
     #-------------------------------------------------------------------------------------
 
 
     if wind==0
+
         @info "no wind being used"
+
     elseif wind==1
         
         @info "loading four years of wind data from netCDF file"
@@ -46,6 +51,7 @@
         lon1 = ds["lon"][:]
 
         close(ds)
+
     end   
 
     #+++ Preamble
@@ -67,8 +73,9 @@
 
     if  bathymetry_mode == 0 
         @info "Using no bathymetry (flat bottom)"
-        Lx_real = 100e4
+        Lx_real = 1000e3
         Ly_real = 500e3
+        
         #Flat bottom
         bottom(x,y) = -500
 
@@ -78,9 +85,9 @@
 
         #Gaussian Bathymetry of Galapagos
         #height of 500 m, 250km mean, 3e4 (30 km STD)
-        Lx_real = 100e4
+        Lx_real = 1000e3
         Ly_real = 500e3
-        bottom(x,y) = -500 + 560 * exp( -(x-params.Lx/2)^2/(2*(3e4)^2) )* exp(-(y-0)^2/(2*(3e4)^2))
+        bottom(x,y) = -500 + 560 * exp( -(x-params.Lx/2)^2/(2*(30e3)^2) )* exp(-(y-0)^2/(2*(30e3)^2))
 
     elseif bathymetry_mode == 2
         @info "Using real bathymetry"
@@ -119,6 +126,7 @@
 
     else
         @warn "Unknown bathymetry_mode; defaulting to real bathymetry"
+
     end
    
 
@@ -322,7 +330,22 @@
     end
 
     #θ = 105 # degrees relative to pos. x-axis
+    if beta_switch == 0
+        @info "No beta plane"
+        coriolis = BetaPlane(latitude=0)
 
+    elseif beta_switch == 1
+
+        @info "Using beta plane"
+        β = 2.28e-11 # m⁻¹ s⁻¹, typical mid-latitude value for beta
+        coriolis = BetaPlane(β=β,latitude=0)
+
+    else
+
+        @warn "Unknown beta_switch value; defaulting to beta plane with latitude=0"
+        β = 2.28e-11 # m⁻¹ s⁻¹, typical mid-latitude value for beta
+        coriolis = BetaPlane(β=β,latitude=0)
+    end
 
     model = HydrostaticFreeSurfaceModel(grid, 
                                 tracers = (:T, :S),
@@ -330,7 +353,7 @@
                                 haline_contraction = 7.86e-4)), 
                                 momentum_advection = WENO(),
                                 tracer_advection = WENO(),
-                                coriolis = BetaPlane(latitude=0),
+                                coriolis = coriolis,
                                 closure = closure,
                                 forcing = forcing,
                                 boundary_conditions = boundary_conditions,
@@ -461,6 +484,8 @@
     
     Δz = params.Lz / params.Nz          # ≈ 16.7m per cell  
     k_75m = Int(round((params.Lz - 75) / Δz))  # how many cells up from bottom  
+    k_150m = Int(round((params.Lz - 150) / Δz))  # how many cells up from bottom  
+    k_225m = Int(round((params.Lz - 225) / Δz))  # how many cells up from bottom  
 
     if bathymetry_mode == 0
         bathy_tag = "no_bathymetry"
@@ -479,31 +504,52 @@
         windtag = "wind"
     end
 
+    if beta_switch == 0
+        beta_tag = "no_beta"
+    elseif beta_switch == 1
+        beta_tag = "beta"
+    end
+
     #create a folder for the netCDF outputs if it doesn't already exist
     output_dir = joinpath(rundir, bathy_folder)
     mkpath(output_dir)  
 
     simulation.output_writers[:surface_slice_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename = joinpath(output_dir, "top_$(bathy_tag)_$(windtag)_GPU.nc"),
+        filename = joinpath(output_dir, "top_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, params.Nz),
                             overwrite_existing = overwrite_existing)
 
     #same with below from indicies(:, round (params.NY/2),:)
     simulation.output_writers[:y_slice_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename= joinpath(output_dir, "midy_$(bathy_tag)_$(windtag)_GPU.nc"),
+        filename= joinpath(output_dir, "midy_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, Int(params.Ny/2), :), 
                         overwrite_existing = overwrite_existing)    
 
+
+    #Below is the upwelling of different level depths (i.e., k_75m, k_150m, k_225m) and saving those outputs as netCDF files.
     simulation.output_writers[:xy_75_depth_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename = joinpath(output_dir, "upwelling_75m_$(bathy_tag)_$(windtag)_GPU.nc"),
+        filename = joinpath(output_dir, "upwelling_75m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, k_75m),
                             overwrite_existing = overwrite_existing)
                             
+    simulation.output_writers[:xy_150_depth_writer] =
+    NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
+    filename = joinpath(output_dir, "upwelling_150m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                    schedule=TimeInterval(8640seconds), indices=(:, :, k_150m),
+                        overwrite_existing = overwrite_existing)
+                            
+    simulation.output_writers[:xy_225_depth_writer] =
+    NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
+    filename = joinpath(output_dir, "upwelling_225m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                    schedule=TimeInterval(8640seconds), indices=(:, :, k_225m),
+                        overwrite_existing = overwrite_existing)
+
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
 
+    
     
         # Save a snapshot at the very end for use as IC
     simulation.output_writers[:IC_writer] =
