@@ -11,6 +11,7 @@
     using Polynomials
     using Oceanostics
     using Oceananigans.Grids: xnode, ynode, znode
+    using Oceananigans.Fields: FunctionField
     using Oceanostics.KineticEnergyEquation: KineticEnergy, KineticEnergyStress, DissipationRate
     using Oceanostics.FlowDiagnostics: QVelocityGradientTensorInvariant, RichardsonNumber
     using Oceanostics.TurbulentKineticEnergyEquation: ShearProductionRate, XShearProductionRate, YShearProductionRate, ZShearProductionRate
@@ -31,6 +32,9 @@
 
     #non-beta vs beta switch
     beta_switch = 1 #0 for no beta, 1 for beta plane
+
+    #Heat and salt flux switch
+    H_S_flux = 1 #0 for no flux, 1 for flux (using linear functions of z for temperature and salinity)
 
     #-------------------------------------------------------------------------------------
 
@@ -125,11 +129,16 @@
         bottom(x, y) = itp(lat_from_y(y), lon_from_x(x))
 
     else
-        @warn "Unknown bathymetry_mode; defaulting to real bathymetry"
+        @warn "Unknown bathymetry_mode; defaulting to gaussian bathymetry"
+
+        #Gaussian Bathymetry of Galapagos
+        #height of 500 m, 250km mean, 3e4 (30 km STD)
+        Lx_real = 1000e3
+        Ly_real = 500e3
+        bottom(x,y) = -500 + 560 * exp( -(x-params.Lx/2)^2/(2*(30e3)^2) )* exp(-(y-0)^2/(2*(30e3)^2))
 
     end
    
-
 
     #++++ Construct grid
     if LES
@@ -180,8 +189,7 @@
 
     @inline U₁(y) = exp(-(y-yₒᵥ)^2/(2*σ_yᵥ^2))
     @inline U₂(z)= exp(-(z-zₒᵥ)^2/(2*σ_zᵥ^2))
-    @inline U(y,z) = Umaxᵥ * U₁(y) * U₂(z)
-
+    @inline U_EUC(y,z) = Umaxᵥ * U₁(y) * U₂(z)
 
     #Modeling temperature profile with the data from paper
 
@@ -197,8 +205,8 @@
         @inline Seast(x,y,z,parameters) = Sₗ(z) #should I add +35 for the background??
         @inline Twest(z,parameters) =  (22-10)*z / 500 + 22 #same deal as Teast
         @inline Swest(x,y,z,parameters) = Sₗ(z)
-        @inline Uwest(y,z,parameters) = U(y,z)  #m/s
-        @inline Ueast(y,z,parameters) = U(y,z) #m/s
+        @inline Uwest(y,z,parameters) = U_EUC(y,z)  #m/s
+        @inline Ueast(y,z,parameters) = U_EUC(y,z) #m/s
         u∞(z, parameters) = params.u_b
         v∞(z, parameters) = params.v_b
     end
@@ -451,10 +459,56 @@
     #++++ Outputs
     @info "Creating output fields"
 
-    # y-component of vorticity
+    #-----------------------------
+    #CALCULATIONS FOR OUTPUT FIELDS
+    #-----------------------------
+
+    # z-component of vorticity (also known as relative vorticity) calculation; vorticity = ∂x(v) - ∂y(u)
     vorticity_z = Field(∂x(v) - ∂y(u))
 
-    outputs = (; u, v, w, T,S,vorticity_z)
+    #Kinetic energy calculation for u, v, w
+    KE_u = Field(@at (Center, Center, Center) 0.5 * u^2)
+    KE_v = Field(@at (Center, Center, Center) 0.5 * v^2)
+    KE_w = Field(@at (Center, Center, Center) 0.5 * w^2)
+    KE_total = Field(@at (Center, Center, Center) 0.5 * (u^2 + v^2 + w^2))
+    
+    #Different depths for upwelling outputs (75m, 150m, 225m)
+    Δz = params.Lz / params.Nz          # ≈ 16.7m per cell  
+    k_75m = Int(round((params.Lz - 75) / Δz))  # how many cells up from bottom  
+    k_150m = Int(round((params.Lz - 150) / Δz))  # how many cells up from bottom  
+    k_225m = Int(round((params.Lz - 225) / Δz))  # how many cells up from bottom  
+    
+    #Calculating flux for upwelling at different depths (heavy calculations, so only doing if H_S_flux == 1)
+
+    if H_S_flux == 0
+        @info "No heat and salt fluxes being calculated"
+    elseif H_S_flux == 1
+        @info "Calculating heat and salt fluxes using linear functions of z for temperature and salinity"
+        #Background of salinity and temprature are my functions of z from above;
+        T_background(x, y, z) = (22-10)*z / 500 + 22
+        S_background(x, y, z) = Sₗ(z)
+
+        #Since these are functions, we need to make them into fields to be able to save them as outputs in the netCDF files
+        T_background_field = FunctionField((Center, Center, Center), T_background, model.grid)
+        S_background_field = FunctionField((Center, Center, Center), S_background, model.grid)
+
+        #Calculate difference of temperature and salinity
+        T_diff = Field(T - T_background_field)
+        S_diff = Field(S - S_background_field)
+
+        #Flux calculation for upwelling for temperature and salinity; spaital changes
+        wT_difference = Field(@at (Center, Center, Center) w * T_diff)
+        wS_difference = Field(@at (Center, Center, Center) w * S_diff)
+
+        #Integrated fluxes; scalar
+        ∫wT_difference_up = Integral(wT_difference)
+        ∫wS_difference_up = Integral(wS_difference)
+
+        flux_outputs = (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up) 
+    end
+    
+    outputs = (; u, v, w, T ,S ,vorticity_z)
+
 
     if mass_flux
         saved_output_prefix = "iceplume"
@@ -476,16 +530,6 @@
 
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
 
-    #Kinetic energy calculation for u, v, w
-    KE_u = Field(@at (Center, Center, Center) 0.5 * u^2)
-    KE_v = Field(@at (Center, Center, Center) 0.5 * v^2)
-    KE_w = Field(@at (Center, Center, Center) 0.5 * w^2)
-    KE_total = Field(@at (Center, Center, Center) 0.5 * (u^2 + v^2 + w^2))
-    
-    Δz = params.Lz / params.Nz          # ≈ 16.7m per cell  
-    k_75m = Int(round((params.Lz - 75) / Δz))  # how many cells up from bottom  
-    k_150m = Int(round((params.Lz - 150) / Δz))  # how many cells up from bottom  
-    k_225m = Int(round((params.Lz - 225) / Δz))  # how many cells up from bottom  
 
     if bathymetry_mode == 0
         bathy_tag = "no_bathymetry"
@@ -547,11 +591,33 @@
                     schedule=TimeInterval(8640seconds), indices=(:, :, k_225m),
                         overwrite_existing = overwrite_existing)
 
+    #Save heat and salt fluxes if the switch is on; these are very computationally expensive, so only doing if H_S_flux == 1
+    if H_S_flux == 1
+        simulation.output_writers[:flux_writer_75] =
+            NetCDFWriter(model, (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up); 
+                        filename = joinpath(output_dir, "fluxes_75m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                        schedule=TimeInterval(8640seconds), indices=(:, :, k_75m),
+                         overwrite_existing = overwrite_existing)
+        simulation.output_writers[:flux_writer_150] =
+            NetCDFWriter(model, (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up); 
+                        filename = joinpath(output_dir, "fluxes_150m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                        schedule=TimeInterval(8640seconds), indices=(:, :, k_150m),
+                         overwrite_existing = overwrite_existing)
+        simulation.output_writers[:flux_writer_225] =
+            NetCDFWriter(model, (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up); 
+                        filename = joinpath(output_dir, "fluxes_225m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                        schedule=TimeInterval(8640seconds), indices=(:, :, k_225m),
+                         overwrite_existing = overwrite_existing)
+    end
+
+
+
+
     ccc_scratch = Field{Center, Center, Center}(model.grid) # Create some scratch space to save memory
 
     
     
-        # Save a snapshot at the very end for use as IC
+    # Save a snapshot at the very end for use as IC
     simulation.output_writers[:IC_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total);
                     filename = joinpath(output_dir, "IC_$(bathy_tag)_$(windtag)_GPU.nc"),

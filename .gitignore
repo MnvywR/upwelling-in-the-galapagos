@@ -29,3 +29,4 @@ galapagos_netcdf_real_bathymetry/
 Galapagos_full_visualization.mp4
 # Loose .nc files in root
 *.nc
+heat_and_salt_flux_graphs.asv
