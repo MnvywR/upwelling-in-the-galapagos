@@ -378,7 +378,7 @@
 
     Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
     simulation = Simulation(model, Δt=Δt₀,
-                            stop_time = 10days, # when to stop the simulation
+                            stop_time = 50days, # when to stop the simulation
     )
 
   
