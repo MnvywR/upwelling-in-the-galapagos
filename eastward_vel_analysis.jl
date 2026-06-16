@@ -292,3 +292,33 @@
         φ_i = angle(u_monthly_fft[i])
         println("  $rank  | $(rpad(round(T_i, digits=1), 15)) | $(rpad(round(T_i*30, digits=0), 13)) | $(rpad(round(f_i, digits=6), 20)) | $(rpad(round(A_i, digits=4), 15)) | $(round(φ_i, digits=4))")
     end
+
+    #Putting top modes on to the related data to see trend
+
+    t_days = collect(0:length(u_clean)-1)
+
+    u_reconstructed = mean(u_clean) .+
+        0.1373 .* cos.(2π .* 0.002737 .* t_days .- 1.5502) .+
+        0.121  .* cos.(2π .* 0.005475 .* t_days .+ 1.8274) .+
+        0.1068 .* cos.(2π .* 0.001895 .* t_days .+ 2.0238)
+
+    reconstructed_eq_plot = Plots.plot(
+        daily_time[time_indices], u_clean,
+        label  = "Original data",
+        lw     = 1.0,
+        alpha  = 0.5,
+        color  = :steelblue,
+        xlabel = "Date",
+        ylabel = "Velocity (m/s)",
+        title  = "EUC Velocity + Top 3 Mode Reconstruction (2000–2026)",
+        size   = (900, 500)
+    )
+
+    Plots.plot!(reconstructed_eq_plot,
+        daily_time[time_indices], u_reconstructed,
+        label = "Top 3 modes (365d + 183d + 528d)",
+        lw    = 2.0,
+        color = :red
+    )
+
+    display(reconstructed_eq_plot)
