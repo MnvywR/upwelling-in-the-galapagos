@@ -501,7 +501,7 @@
         wS_difference = Field(@at (Center, Center, Center) w * S_diff)
 
         #Integrated fluxes; scalar
-        ∫wT_difference_up = Integral(wT_difference)
+        ∫wT_difference_up = Integral(wT_difference) 
         ∫wS_difference_up = Integral(wS_difference)
 
         flux_outputs = (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up) 
