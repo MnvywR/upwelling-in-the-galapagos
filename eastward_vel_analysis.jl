@@ -19,69 +19,12 @@
 
     #IMPORTING DATA SETS HERE:
 
-    data_sets = glob("eastward_vel_daily_data/eastward_sea_velocity_daily_*.nc")  # Adjust the pattern as needed
-    println("Found daily data files:")
-    for file in data_sets
-        println("  $file")
-    end
+    daily_data_nc = NCDataset("eastward_vel_daily_data/daily_eastward_sea_velocity_2000_to_2026.nc")  # update filename to match yours
 
-    # OPENING EACH NETCDF, EXTRACTING TIME AND UO, AND CONCATENATING ALONG THE TIME DIMENSION
-    # Declaring empty coordinate variables
-    times_all       = DateTime[]
-    uo_list         = Vector{Array{Float64,4}}()
-    daily_depth     = Float64[]
-    daily_longitude = Float64[]
-    daily_latitude  = Float64[]
-
-    # Common depth levels (i.e. around 0 - 500m)
-    all_depths = nothing
-    for f in data_sets
-        ds = NCDataset(f)
-        d  = Float64.(ds["depth"][:])
-        close(ds)
-        if all_depths === nothing
-            global all_depths = Set(d)
-        else
-            global all_depths = intersect(all_depths, Set(d))
-        end
-    end
-    common_depths = sort(collect(all_depths))
-    println("Common depth levels across all files: $(length(common_depths))")
-
-    #Slicing only the common depth levels
-    for f in data_sets
-        ds = NCDataset(f)
-
-        local t   = ds["time"][:]
-        dep = Float64.(ds["depth"][:])
-
-        # indices into THIS file's depth array that match the common depths
-        dep_idx = [argmin(abs.(dep .- d)) for d in common_depths]
-
-        uo_full = Float64.(coalesce.(ds["uo"][:, :, :, :], NaN))
-        uo      = uo_full[:, :, dep_idx, :]   # slice to common depths
-
-        if isempty(daily_depth)
-            global daily_depth     = common_depths
-            global daily_longitude = Float64.(ds["longitude"][:])
-            global daily_latitude  = Float64.(ds["latitude"][:])
-        end
-
-        close(ds)
-        append!(times_all, t)
-        push!(uo_list, uo)
-    end
-
-
-    # Concatenate along the time (4th) dimension
-    daily_uo   = reduce((a, b) -> cat(a, b; dims=4), uo_list)
-    daily_time = times_all
-
-    # Sort everything by time
-    sort_idx   = sortperm(daily_time)
-    daily_time = daily_time[sort_idx]
-    daily_uo   = daily_uo[:, :, :, sort_idx]
-
+    daily_depth     = Float64.(daily_data_nc["depth"][:])
+    daily_longitude = Float64.(daily_data_nc["longitude"][:])
+    daily_latitude  = Float64.(daily_data_nc["latitude"][:])
+    daily_time      = daily_data_nc["time"][:]
 
     #LOADING IN DATA FROM THE DAILY DATASET:
 
@@ -91,14 +34,16 @@
     i_dep = argmin(abs.(daily_depth     .- target_depth))
 
     # Filter to first year (2018) — adjust as needed
-    start_date   = DateTime(2017, 1, 1)
-    end_date     = DateTime(2021, 12, 31)
+    start_date   = DateTime(2000, 1, 1)
+    end_date     = DateTime(2026, 1, 1)
     time_mask    = (daily_time .>= start_date) .& (daily_time .<= end_date)
     time_indices = findall(time_mask)
 
 
     # u dims: (longitude × latitude × depth × time) 
-    new_daily_data = daily_uo[i_lon, i_lat, i_dep, time_indices]
+    new_daily_data = Float64.(coalesce.(daily_data_nc["uo"][i_lon, i_lat, i_dep, time_indices], NaN))
+    
+    close(daily_data_nc)
 
     # Replace any remaining NaN with the mean
     valid_mean = mean(filter(!isnan, new_daily_data))
@@ -147,7 +92,7 @@
         seriestype = :sticks,
         grid = true,
         ylabel = "Energy",
-        title  = "Energy Spectrum of Daily Velocity (2017–2021)",
+        title  = "Energy Spectrum of Daily Velocity (2000–2026)",
         lw = 1.5,
         label = "Power"
     )
@@ -158,7 +103,7 @@
         xlabel = "Frequency (cycles/day)",
         grid = true,
         ylabel = "Energy",
-        title  = "Energy Spectrum of Daily Velocity (2017–2021)",
+        title  = "Energy Spectrum of Daily Velocity (2000–2026)",
         lw = 1.5,
         label = "Power"
     )
@@ -170,10 +115,10 @@
         seriestype = :sticks,
         grid = true,
         ylabel = "Energy",
-        title  = "Energy Spectrum of Daily Velocity (2017–2021)",
+        title  = "Energy Spectrum of Daily Velocity (2000–2026)",
         lw = 1.5,
         label = "Power",
-        xticks = 0:100:2000,
+        xticks = 0:100:5000,
         xrotation = 45
     )
     display(plot_fft_days)
@@ -235,7 +180,7 @@
         seriestype = :sticks,
         grid = true,
         ylabel = "Energy",
-        title  = "Energy Spectrum of Monthly Velocity (2017–2021)",
+        title  = "Energy Spectrum of Monthly Velocity (2000–2026)",
         lw = 1.5,
         label = "Power"
     )
@@ -246,7 +191,7 @@
         xlabel = "Frequency (cycles/month)",
         grid = true,
         ylabel = "Energy",
-        title  = "Energy Spectrum of Monthly Velocity (2017–2021)",
+        title  = "Energy Spectrum of Monthly Velocity (2000–2026)",
         lw = 1.5,
         label = "Power"
     )
@@ -261,7 +206,6 @@
         title  = "Energy Spectrum of Monthly Velocity (2017–2021)",
         lw = 1.5,
         label = "Power",
-        xticks = 0:2:61,
         xrotation = 45
     )
     display(plot_fft_months)
@@ -285,11 +229,11 @@
         xlabel     = "Period (days)",
         seriestype = :sticks,
         ylabel     = "Normalized Energy",
-        title      = "Energy Spectrum: Daily vs Monthly (2017–2021)",
+        title      = "Energy Spectrum: Daily vs Monthly (2000–2026)",
         label      = "Daily",
         color      = :steelblue,
         lw         = 1.5,
-        xticks     = 0:100:2000,
+        xticks     = 0:100:9000,
         xrotation  = 45,
         size       = (900, 700)
     )
@@ -304,3 +248,47 @@
     )
 
     display(plot_combined)
+
+    #------------------------------------------------
+    #Pulling peaks from the Daily and Monthly data
+    #------------------------------------------------
+
+    #DAILY DATA:
+
+    #The hann window shrinks the amplitude, so I am re-adjusting it
+    window_correction = mean(hann)
+
+    top_n = 10  # how many modes to extract
+
+    # Sort by energy, skip DC
+    top_idx_daily = sortperm(energy_spectrum, rev=true)[1:top_n]
+    top_idx_daily = half_range[top_idx_daily]  # shift back to full array indices
+
+    println("\n=== Top $top_n Daily Modes ===")
+    println("Rank | Period (days) | Frequency (cyc/day) | Amplitude (m/s) | Phase (rad)")
+    println("-----|---------------|---------------------|-----------------|------------")
+    for (rank, i) in enumerate(top_idx_daily) #Pair up the top index with a rank of the highest modes
+        f_i = Frequencies[i] #The frequency
+        T_i = 1.0 / f_i #The period
+        A_i = (2 * abs(u_fft[i]) / N_days) / window_correction #The amplitude
+        φ_i = angle(u_fft[i])
+        println("  $rank  | $(rpad(round(T_i, digits=1), 13)) | $(rpad(round(f_i, digits=6), 19)) | $(rpad(round(A_i, digits=4), 15)) | $(round(φ_i, digits=4))")
+    end
+
+    #MONTHLY DATA:
+
+    window_correction_months = mean(hann_monthly)
+
+    top_idx_monthly = sortperm(energy_spectrum_months, rev=true)[1:top_n]
+    top_idx_monthly = half_range_months[top_idx_monthly]
+
+    println("\n=== Top $top_n Monthly Modes ===")
+    println("Rank | Period (months) | Period (days) | Frequency (cyc/month) | Amplitude (m/s) | Phase (rad)")
+    println("-----|-----------------|---------------|----------------------|-----------------|------------")
+    for (rank, i) in enumerate(top_idx_monthly)
+        f_i = Frequencies_months[i]
+        T_i = 1.0 / f_i
+        A_i = (2 * abs(u_monthly_fft[i]) / N_months) / window_correction_months
+        φ_i = angle(u_monthly_fft[i])
+        println("  $rank  | $(rpad(round(T_i, digits=1), 15)) | $(rpad(round(T_i*30, digits=0), 13)) | $(rpad(round(f_i, digits=6), 20)) | $(rpad(round(A_i, digits=4), 15)) | $(round(φ_i, digits=4))")
+    end
