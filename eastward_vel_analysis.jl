@@ -265,14 +265,13 @@
     top_idx_daily = half_range[top_idx_daily]  # shift back to full array indices
 
     println("\n=== Top $top_n Daily Modes ===")
-    println("Rank | Period (days) | Frequency (cyc/day) | Amplitude (m/s) | Phase (rad)")
-    println("-----|---------------|---------------------|-----------------|------------")
+    println("Rank | Period (days) | Frequency (cyc/day) | Amplitude (m/s)")
+    println("-----|---------------|---------------------|-----------------")
     for (rank, i) in enumerate(top_idx_daily) #Pair up the top index with a rank of the highest modes
         f_i = Frequencies[i] #The frequency
         T_i = 1.0 / f_i #The period
-        A_i = (2 * abs(u_fft[i]) / N_days) / window_correction #The amplitude
-        φ_i = angle(u_fft[i])
-        println("  $rank  | $(rpad(round(T_i, digits=1), 13)) | $(rpad(round(f_i, digits=6), 19)) | $(rpad(round(A_i, digits=4), 15)) | $(round(φ_i, digits=4))")
+        A_i = (2 * abs(u_fft[i]) / N_days) / window_correction #The amplitude        
+        println("  $rank  | $(rpad(round(T_i, digits=1), 13)) | $(rpad(round(f_i, digits=6), 19)) | $(rpad(round(A_i, digits=4), 15))")
     end
 
     #MONTHLY DATA:
@@ -283,14 +282,13 @@
     top_idx_monthly = half_range_months[top_idx_monthly]
 
     println("\n=== Top $top_n Monthly Modes ===")
-    println("Rank | Period (months) | Period (days) | Frequency (cyc/month) | Amplitude (m/s) | Phase (rad)")
-    println("-----|-----------------|---------------|----------------------|-----------------|------------")
+    println("Rank | Period (months) | Period (days) | Frequency (cyc/month) | Amplitude (m/s)")
+    println("-----|-----------------|---------------|----------------------|-----------------")
     for (rank, i) in enumerate(top_idx_monthly)
         f_i = Frequencies_months[i]
         T_i = 1.0 / f_i
         A_i = (2 * abs(u_monthly_fft[i]) / N_months) / window_correction_months
-        φ_i = angle(u_monthly_fft[i])
-        println("  $rank  | $(rpad(round(T_i, digits=1), 15)) | $(rpad(round(T_i*30, digits=0), 13)) | $(rpad(round(f_i, digits=6), 20)) | $(rpad(round(A_i, digits=4), 15)) | $(round(φ_i, digits=4))")
+        println("  $rank  | $(rpad(round(T_i, digits=1), 15)) | $(rpad(round(T_i*30, digits=0), 13)) | $(rpad(round(f_i, digits=6), 20)) | $(rpad(round(A_i, digits=4), 15))")
     end
 
     #Putting top modes on to the related data to see trend
@@ -322,3 +320,9 @@
     )
 
     display(reconstructed_eq_plot)
+
+    #----------------------------------------------
+    #Figuring out phase of top dominant wave modes
+    #----------------------------------------------
+    #u_fft has both the imaginary and real parts from the FFT
+    u_fft

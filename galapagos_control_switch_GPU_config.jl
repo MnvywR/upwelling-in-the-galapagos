@@ -21,7 +21,6 @@
     using Oceananigans: Callback, IterationInterval
     using Oceanostics.ProgressMessengers: SingleLineMessenger 
     using CairoMakie
-    using ImageFiltering
 
     #-------------------------------------------------------------------------------------
     #CONTROL BOARD
@@ -79,6 +78,32 @@
     end
     #---
 
+    function make_gaussian_kernel(sigma=1.0)
+        offsets = -1:1
+        kernel = [exp(-(x^2 + y^2) / (2*sigma^2)) for y in offsets, x in offsets]
+        return kernel ./ sum(kernel)
+    end
+
+    function apply_gaussian(data::AbstractMatrix, sigma=1.0)
+        kernel = make_gaussian_kernel(sigma)
+        nrows, ncols = size(data)
+        output = copy(data)   # copy so borders keep original values
+
+        for j in 2:ncols-1
+            for i in 2:nrows-1
+                patch = @view data[i-1:i+1, j-1:j+1]
+                valid = .!ismissing.(patch) .& .!isnan.(patch)
+                w     = kernel[valid]
+                vals  = Float64.(patch[valid])
+                if !isempty(vals)
+                    output[i, j] = sum(w .* vals) / sum(w)
+                end
+            end
+        end
+
+        return output
+    end
+
     if  bathymetry_mode == 0 
         @info "Using no bathymetry (flat bottom)"
         Lx_real = 1000e3
@@ -108,6 +133,8 @@
         zflat = ds["z"][:] # depth values (flattened)
         close(ds)
 
+        deg_per_meter = 1 / 111e3
+
         nx = length(lon)
         ny = length(lat)
 
@@ -118,15 +145,12 @@
             @info "Using non-smoothed real island bathymetry"
 
         elseif Smoothing_bathymetry == 1
-            
-            # Define smoothing intensity (higher values = more blur/smoothing)
-            sigma_val = 5.0  #Change this depending on grid 
+            sigma_val = 1.0
+            depth = apply_gaussian(depth, sigma_val)
+            @info "Using gaussian filter with sigma of $sigma_val"
 
-            # Apply Gaussian filter 
-            depth = imfilter(depth, Kernel.gaussian(sigma_val))
-
-            @info "Using smoothed bathymetry of sigma value $sigma_val"
         end
+        
 
         depth = min.(depth, 0) #clipping depth for land above zero (i.e. sea level)
         depth[(-10 .< depth) .& (depth .< 0)] .= 0 #clipping between 20-0 depth for gradiant spikes
@@ -134,14 +158,25 @@
         Lx_real = (maximum(lon) - minimum(lon)) * 111e3
         Ly_real = (maximum(lat) - minimum(lat)) * 111e3
 
+
+        sponge_m = 50000.0
+        dlon = abs(lon[2] - lon[1]) #Grid points equating to 50km
+        sponge_cols = round(Int, sponge_m * deg_per_meter / dlon)
+
+        #West sponge; computing mean depth
+        band_width = 5
+        west_reference_depth = mean(depth[sponge_cols: sponge_cols+band_width, :])
+        east_reference_depth = mean(depth[end-sponge_cols-band_width : end-sponge_cols, :])
+
+        depth[1:sponge_cols, :] .= west_reference_depth
+        depth[end-sponge_cols:end, :] .= east_reference_depth
+
         #Interpolator is taking latitude and longitude (i.e., y and x)
 
         itp = extrapolate(
             interpolate((lat, lon), collect(depth'), Gridded(Linear())),
             Interpolations.Flat()
         )
-
-        deg_per_meter = 1 / 111e3
 
         #island_lat = 0
         lon_from_x(x) = minimum(lon) + x * deg_per_meter
