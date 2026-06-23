@@ -10,6 +10,7 @@
     using Interpolations
     using Polynomials
     using Oceanostics
+    using Oceanostics: SingleLineProgressMessenger
     using Oceananigans.Grids: xnode, ynode, znode
     using Oceananigans.Fields: FunctionField
     using Oceanostics.KineticEnergyEquation: KineticEnergy, KineticEnergyStress, DissipationRate
@@ -20,6 +21,7 @@
     using Oceananigans: Callback, IterationInterval
     using Oceanostics.ProgressMessengers: SingleLineMessenger 
     using CairoMakie
+    using ImageFiltering
 
     #-------------------------------------------------------------------------------------
     #CONTROL BOARD
@@ -34,8 +36,10 @@
     beta_switch = 1 #0 for no beta, 1 for beta plane
 
     #Heat and salt flux switch
-    H_S_flux = 1 #0 for no flux, 1 for flux (using linear functions of z for temperature and salinity)
+    H_S_flux = 0 #0 for no flux, 1 for flux (using linear functions of z for temperature and salinity)
 
+    #Smoothing bathymetry switch
+    Smoothing_bathymetry = 1 #0 for original bathymetry, 1 for gaussian smoothed bathymetry
     #-------------------------------------------------------------------------------------
 
 
@@ -105,13 +109,32 @@
         close(ds)
 
         nx = length(lon)
-        nz = length(lat)
+        ny = length(lat)
 
-        depth = reshape(zflat, nx, nz) # reshape to 2D grid (lat × lon)
+        #Depth is [lon,lat]
+        depth = reshape(zflat, nx, ny) # reshape to 2D grid (lat × lon)
 
+        if Smoothing_bathymetry == 0
+            @info "Using non-smoothed real island bathymetry"
+
+        elseif Smoothing_bathymetry == 1
+            
+            # Define smoothing intensity (higher values = more blur/smoothing)
+            sigma_val = 5.0  #Change this depending on grid 
+
+            # Apply Gaussian filter 
+            depth = imfilter(depth, Kernel.gaussian(sigma_val))
+
+            @info "Using smoothed bathymetry of sigma value $sigma_val"
+        end
+
+        depth = min.(depth, 0) #clipping depth for land above zero (i.e. sea level)
+        depth[(-10 .< depth) .& (depth .< 0)] .= 0 #clipping between 20-0 depth for gradiant spikes
 
         Lx_real = (maximum(lon) - minimum(lon)) * 111e3
         Ly_real = (maximum(lat) - minimum(lat)) * 111e3
+
+        #Interpolator is taking latitude and longitude (i.e., y and x)
 
         itp = extrapolate(
             interpolate((lat, lon), collect(depth'), Gridded(Linear())),
@@ -119,6 +142,7 @@
         )
 
         deg_per_meter = 1 / 111e3
+
         #island_lat = 0
         lon_from_x(x) = minimum(lon) + x * deg_per_meter
 
@@ -374,7 +398,6 @@
     #----
 
     #++++ Create simulation
-    using Oceanostics: SingleLineProgressMessenger
 
     Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
     simulation = Simulation(model, Δt=Δt₀,
