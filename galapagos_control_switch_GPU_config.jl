@@ -72,8 +72,8 @@
     ext_forcing = true
 
     if has_cuda_gpu()
-        #arch = GPU()
-    #else
+        arch = GPU()
+    else
         arch = CPU()
     end
     #---
