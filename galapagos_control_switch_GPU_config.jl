@@ -72,8 +72,8 @@
     ext_forcing = true
 
     if has_cuda_gpu()
-        arch = GPU()
-    else
+        #arch = GPU()
+    #else
         arch = CPU()
     end
     #---
@@ -185,8 +185,11 @@
 
         lat_from_y(y) = minimum(lat) + (y + Ly_real/2 - y_offset) * deg_per_meter
 
-        bottom(x, y) = itp(lat_from_y(y), lon_from_x(x))
-
+        #bottom(x, y) = itp(lat_from_y(y), lon_from_x(x))
+        function bottom(x, y)
+            val = itp(lat_from_y(y), lon_from_x(x))
+            return isnan(val) || ismissing(val) ? -params.Lz : Float64(val)
+        end
     else
         @warn "Unknown bathymetry_mode; defaulting to gaussian bathymetry"
 
@@ -200,15 +203,20 @@
    
 
     #++++ Construct grid
-    if LES
-        params = (; Lx = Lx_real,
-                Ly = Ly_real,
-                Lz = 500,
-                Nx = 50,
-                Ny = 50,
-                Nz = 50,
-                ) 
-    end
+    
+    params = (; Lx = Lx_real,
+            Ly = Ly_real,
+            Lz = 500,
+            Nx = 50,
+            Ny = 50,
+            Nz = 50,
+            N²₀ = 2e-4, #  9.83/1028*2/100  1/s (stratification frequency)
+            σ = 40000.0seconds, # s (relaxation timescale for sponge layer) how long we expect it to; now 1 day CHANGedto 40000 seconds (half a day)
+            #uₑᵥₐᵣ = 0.00, # m/s (velocity variation along the z direction of the east boundary)
+            u_b = 0.0,    # m s⁻¹, average wind velocity 10 meters above the ocean
+            v_b = 0.0,    #-10    # m s⁻¹, average wind velocity 10 meters above the ocean
+            )
+
     #changing grid i.e. Nx Ny Nz to 30 30 30 cuz laptop
     if arch == CPU() 
         params = (; params..., Nx = 30, Ny = 30, Nz = 30)
@@ -228,15 +236,6 @@
 
     @info "Grid" grid
 
-
-    # Not necessary, but makes organizing simulations easier and facilitates running on GPUs
-    params = (; params...,
-            N²₀ = 2e-4, #  9.83/1028*2/100  1/s (stratification frequency)
-            σ = 40000.0seconds, # s (relaxation timescale for sponge layer) how long we expect it to; now 1 day CHANGedto 40000 seconds (half a day)
-            #uₑᵥₐᵣ = 0.00, # m/s (velocity variation along the z direction of the east boundary)
-            u_b = 0.0,    # m s⁻¹, average wind velocity 10 meters above the ocean
-            v_b = 0.0,    #-10    # m s⁻¹, average wind velocity 10 meters above the ocean
-            )
     #----
 
     #modeling eastward EUC velocity with the data from paper
@@ -400,15 +399,11 @@
     if beta_switch == 0
         @info "No beta plane"
         coriolis = BetaPlane(latitude=0)
-
     elseif beta_switch == 1
-
         @info "Using beta plane"
         β = 2.28e-11 # m⁻¹ s⁻¹, typical mid-latitude value for beta
         coriolis = BetaPlane(β=β,latitude=0)
-
     else
-
         @warn "Unknown beta_switch value; defaulting to beta plane with latitude=0"
         β = 2.28e-11 # m⁻¹ s⁻¹, typical mid-latitude value for beta
         coriolis = BetaPlane(β=β,latitude=0)
@@ -436,14 +431,33 @@
 
     Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
     simulation = Simulation(model, Δt=Δt₀,
-                            stop_time = 50days, # when to stop the simulation
+                            stop_time = 1days, # when to stop the simulation
     )
 
-  
+    
     #++++ Adapt time step
-    wizard = TimeStepWizard(cfl=0.8, # How to adjust the time step
-                            max_change=1.02, min_change=0.2, min_Δt=0.1seconds) #max_Δt=0.5/√params.N²₀)
+    wizard = TimeStepWizard(cfl=0.5, # How to adjust the time step
+                            max_change=1.02, 
+                            min_change=0.5, 
+                            max_Δt=300seconds,
+                            min_Δt=1.0seconds) #max_Δt=0.5/√params.N²₀)
     simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2)) # When to adjust the time step
+    #----
+
+
+
+    #++++ NaN checker
+    function nan_checker(sim)
+        fields = merge(sim.model.velocities, sim.model.tracers)
+        for (name, f) in pairs(fields)
+            if any(isnan, interior(f))
+                t = sim.model.clock.time / 86400
+                @error "NaN detected in $name at day $(round(t, digits=2))"
+            end
+        end
+    end
+
+    simulation.callbacks[:nan_check] = Callback(nan_checker, IterationInterval(50))
     #----
 
     #++++ Printing to screen
