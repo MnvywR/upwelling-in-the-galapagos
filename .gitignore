@@ -31,3 +31,9 @@ Galapagos_full_visualization.mp4
 *.nc
 heat_and_salt_flux_graphs.asv
 checkpoint_iceplume_nomf_*
+run_err.txt
+debug_run.jl
+runs/real_bathymetry_beta_no_wind_20260707_175032_220/metadata.xlsx
+runs/real_bathymetry_no_beta_no_wind_20260707_175031_699/metadata.xlsx
+runs/real_bathymetry_beta_no_wind_20260707_175034_416/metadata.xlsx
+run_log.txt
