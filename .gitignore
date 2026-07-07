@@ -30,3 +30,4 @@ Galapagos_full_visualization.mp4
 # Loose .nc files in root
 *.nc
 heat_and_salt_flux_graphs.asv
+checkpoint_iceplume_nomf_*

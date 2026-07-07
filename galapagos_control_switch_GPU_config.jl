@@ -21,6 +21,8 @@
     using Oceananigans: Callback, IterationInterval
     using Oceanostics.ProgressMessengers: SingleLineMessenger 
     using CairoMakie
+    using XLSX, DataFrames
+    using Dates
 
     #-------------------------------------------------------------------------------------
     #CONTROL BOARD
@@ -39,6 +41,8 @@
 
     #Smoothing bathymetry switch
     Smoothing_bathymetry = 1 #0 for original bathymetry, 1 for gaussian smoothed bathymetry
+
+    EUC_model = "constant" #Look at the function, but constant = constant forcing, fourier-based is the data based waveforms
     #-------------------------------------------------------------------------------------
 
 
@@ -207,9 +211,9 @@
     params = (; Lx = Lx_real,
             Ly = Ly_real,
             Lz = 500,
-            Nx = 50,
-            Ny = 50,
-            Nz = 50,
+            Nx = 30,
+            Ny = 30,
+            Nz = 30,
             N²₀ = 2e-4, #  9.83/1028*2/100  1/s (stratification frequency)
             σ = 40000.0seconds, # s (relaxation timescale for sponge layer) how long we expect it to; now 1 day CHANGedto 40000 seconds (half a day)
             #uₑᵥₐᵣ = 0.00, # m/s (velocity variation along the z direction of the east boundary)
@@ -238,16 +242,20 @@
 
     #----
 
-    #modeling eastward EUC velocity with the data from paper
-    const Umaxᵥ = 0.5 #m/s
-    const zₒᵥ = -75 #m 
-    const yₒᵥ = 0 #m
-    const σ_zᵥ = 20 #m #change to around 20 ish
-    const σ_yᵥ = 55600 #0.5 * pi/180 * (6.371*10^6) #m = 55,600 meters #divide by two 
+    if EUC_model == "constant"
+        #modeling eastward EUC velocity with the data from paper
+        const Umaxᵥ = 0.5 #m/s
+        const zₒᵥ = -75 #m 
+        const yₒᵥ = 0 #m
+        const σ_zᵥ = 20 #m #change to around 20 ish
+        const σ_yᵥ = 55600 #0.5 * pi/180 * (6.371*10^6) #m = 55,600 meters #divide by two 
 
-    @inline U₁(y) = exp(-(y-yₒᵥ)^2/(2*σ_yᵥ^2))
-    @inline U₂(z)= exp(-(z-zₒᵥ)^2/(2*σ_zᵥ^2))
-    @inline U_EUC(y,z) = Umaxᵥ * U₁(y) * U₂(z)
+        @inline U₁(y) = exp(-(y-yₒᵥ)^2/(2*σ_yᵥ^2))
+        @inline U₂(z)= exp(-(z-zₒᵥ)^2/(2*σ_zᵥ^2))
+        @inline U_EUC(y,z) = Umaxᵥ * U₁(y) * U₂(z)
+    elseif EUC_model == "fourier based"
+        nothing
+    end
 
     #Modeling temperature profile with the data from paper
 
@@ -431,7 +439,7 @@
 
     Δt₀ = 1/2 * minimum_yspacing(grid) / 1 # / (u₁_west + 1)
     simulation = Simulation(model, Δt=Δt₀,
-                            stop_time = 1days, # when to stop the simulation
+                            stop_time = 100days, # when to stop the simulation
     )
 
     
@@ -439,26 +447,9 @@
     wizard = TimeStepWizard(cfl=0.5, # How to adjust the time step
                             max_change=1.02, 
                             min_change=0.5, 
-                            max_Δt=300seconds,
-                            min_Δt=1.0seconds) #max_Δt=0.5/√params.N²₀)
+                            max_Δt=0.5/√params.N²₀) #max_Δt=0.5/√params.N²₀)
     simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2)) # When to adjust the time step
-    #----
-
-
-
-    #++++ NaN checker
-    function nan_checker(sim)
-        fields = merge(sim.model.velocities, sim.model.tracers)
-        for (name, f) in pairs(fields)
-            if any(isnan, interior(f))
-                t = sim.model.clock.time / 86400
-                @error "NaN detected in $name at day $(round(t, digits=2))"
-            end
-        end
-    end
-
-    simulation.callbacks[:nan_check] = Callback(nan_checker, IterationInterval(50))
-    #----
+    #----   
 
     #++++ Printing to screen
 
@@ -546,9 +537,9 @@
     
     #Different depths for upwelling outputs (75m, 150m, 225m)
     Δz = params.Lz / params.Nz          # ≈ 16.7m per cell  
-    k_75m = Int(round((params.Lz - 75) / Δz))  # how many cells up from bottom  
-    k_150m = Int(round((params.Lz - 150) / Δz))  # how many cells up from bottom  
-    k_225m = Int(round((params.Lz - 225) / Δz))  # how many cells up from bottom  
+    k_75m = Int(floor((params.Lz - 75) / Δz))  # how many cells up from bottom  
+    k_150m = Int(floor((params.Lz - 150) / Δz))  # how many cells up from bottom  
+    k_225m = Int(floor((params.Lz - 225) / Δz))  # how many cells up from bottom  
     
     #Calculating flux for upwelling at different depths (heavy calculations, so only doing if H_S_flux == 1)
 
@@ -630,16 +621,88 @@
     output_dir = joinpath(rundir, bathy_folder)
     mkpath(output_dir)  
 
+
+
+
+
+    
+    #++++ Save run metadata (parameters + switches + timestamp) to an Excel file
+    # This gives every run a self-documenting record: what was swept, when it ran,
+    # and which folder/tag its NetCDF outputs live under — so results never get
+    # separated from the settings that produced them.
+ 
+    run_timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
+    run_tag = "$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)"
+ 
+    # Anything not already in `params` but useful for identifying/reproducing this run
+    switches = Dict(
+        "bathymetry_mode"       => bathymetry_mode,
+        "bathy_tag"             => bathy_tag,
+        "wind"                  => wind,
+        "wind_tag"              => windtag,
+        "EUC_model"             => EUC_model,
+        "beta_switch"           => beta_switch,
+        "beta_tag"              => beta_tag,
+        "H_S_flux"              => H_S_flux,
+        "Smoothing_bathymetry"  => Smoothing_bathymetry,
+        "interpolated_IC"       => interpolated_IC,
+        "ext_forcing"           => ext_forcing,
+        "arch"                  => string(arch),
+        "Delta_t0_seconds"      => string(Δt₀),
+        "stop_time"             => string(simulation.stop_time),
+        "saved_output_prefix"   => saved_output_prefix,
+    )
+ 
+    function build_metadata_df(params, switches)
+        rows   = String[]
+        values = String[]
+        for (k, v) in pairs(params)
+            push!(rows, String(k))
+            push!(values, string(v))   # string() safely handles Unitful quantities too
+        end
+        for (k, v) in switches
+            push!(rows, k)
+            push!(values, string(v))
+        end
+        return DataFrame(Parameter = rows, Value = values)
+    end
+ 
+    metadata_df = build_metadata_df(params, switches)
+ 
+    metadata_filename = joinpath(output_dir, "metadata_$(run_tag).xlsx")
+ 
+    XLSX.openxlsx(metadata_filename, mode="w") do xf
+        sheet = xf[1]
+        XLSX.rename!(sheet, "Metadata")
+ 
+        sheet["A1"] = "Run tag"
+        sheet["B1"] = run_tag
+        sheet["A2"] = "Timestamp"
+        sheet["B2"] = run_timestamp
+        sheet["A3"] = "Output folder"
+        sheet["B3"] = output_dir
+ 
+        sheet["A5"] = "Parameter"
+        sheet["B5"] = "Value"
+        for (i, row) in enumerate(eachrow(metadata_df))
+            sheet["A$(5+i)"] = row.Parameter
+            sheet["B$(5+i)"] = row.Value
+        end
+    end
+ 
+    @info "Wrote run metadata to $metadata_filename"
+    #----
+
     simulation.output_writers[:surface_slice_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename = joinpath(output_dir, "top_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+        filename = joinpath(output_dir, "top_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, params.Nz),
                             overwrite_existing = overwrite_existing)
 
     #same with below from indicies(:, round (params.NY/2),:)
     simulation.output_writers[:y_slice_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename= joinpath(output_dir, "midy_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+        filename= joinpath(output_dir, "midy_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, Int(params.Ny/2), :), 
                         overwrite_existing = overwrite_existing)    
 
@@ -647,19 +710,19 @@
     #Below is the upwelling of different level depths (i.e., k_75m, k_150m, k_225m) and saving those outputs as netCDF files.
     simulation.output_writers[:xy_75_depth_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-        filename = joinpath(output_dir, "upwelling_75m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+        filename = joinpath(output_dir, "upwelling_75m_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, k_75m),
                             overwrite_existing = overwrite_existing)
                             
     simulation.output_writers[:xy_150_depth_writer] =
     NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-    filename = joinpath(output_dir, "upwelling_150m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+    filename = joinpath(output_dir, "upwelling_150m_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                     schedule=TimeInterval(8640seconds), indices=(:, :, k_150m),
                         overwrite_existing = overwrite_existing)
                             
     simulation.output_writers[:xy_225_depth_writer] =
     NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
-    filename = joinpath(output_dir, "upwelling_225m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+    filename = joinpath(output_dir, "upwelling_225m_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                     schedule=TimeInterval(8640seconds), indices=(:, :, k_225m),
                         overwrite_existing = overwrite_existing)
 
@@ -667,17 +730,17 @@
     if H_S_flux == 1
         simulation.output_writers[:flux_writer_75] =
             NetCDFWriter(model, (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up); 
-                        filename = joinpath(output_dir, "fluxes_75m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                        filename = joinpath(output_dir, "fluxes_75m_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, k_75m),
                          overwrite_existing = overwrite_existing)
         simulation.output_writers[:flux_writer_150] =
             NetCDFWriter(model, (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up); 
-                        filename = joinpath(output_dir, "fluxes_150m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                        filename = joinpath(output_dir, "fluxes_150m_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, k_150m),
                          overwrite_existing = overwrite_existing)
         simulation.output_writers[:flux_writer_225] =
             NetCDFWriter(model, (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up); 
-                        filename = joinpath(output_dir, "fluxes_225m_$(bathy_tag)_$(windtag)_$(beta_tag)_GPU.nc"),
+                        filename = joinpath(output_dir, "fluxes_225m_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                         schedule=TimeInterval(8640seconds), indices=(:, :, k_225m),
                          overwrite_existing = overwrite_existing)
     end
@@ -692,7 +755,7 @@
     # Save a snapshot at the very end for use as IC
     simulation.output_writers[:IC_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total);
-                    filename = joinpath(output_dir, "IC_$(bathy_tag)_$(windtag)_GPU.nc"),
+                    filename = joinpath(output_dir, "IC_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
                     schedule = TimeInterval(365days),  # only saves at the end
                     overwrite_existing = overwrite_existing)
     

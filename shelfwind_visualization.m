@@ -7,9 +7,11 @@
 %% ==========================================
 %%CONTROL SWITCH
 
-bathymetry_mode = 1;  % 0 = no_bathymetry, 1 = gaussian_bathymetry, 2 = real_bathymetry
+bathymetry_mode = 2;  % 0 = no_bathymetry, 1 = gaussian_bathymetry, 2 = real_bathymetry
 
 wind = 0;             % 0 = nowind, 1 = wind
+
+beta = 1;             % 0 = no beta plane, 1 = beta plane
 
 %% ==========================================
 
@@ -30,8 +32,14 @@ elseif wind == 1
     wind_tag = 'wind';
 end
 
-file_top  = fullfile(bathy_folder, sprintf('top_%s_%s_GPU.nc',  bathy_tag, wind_tag));
-file_midy = fullfile(bathy_folder, sprintf('midy_%s_%s_GPU.nc', bathy_tag, wind_tag));
+if beta == 0
+    beta_tag = 'no_beta'
+elseif beta == 1
+    beta_tag = 'beta';
+end
+
+file_top  = fullfile(bathy_folder, sprintf('top_%s_%s_%s_GPU.nc',  bathy_tag, wind_tag, beta_tag));
+file_midy = fullfile(bathy_folder, sprintf('midy_%s_%s_%s_GPU.nc', bathy_tag, wind_tag, beta_tag));
 
 %% ---- Load coordinates ----
 x    = ncread(file_top,  'x_caa')/1000;
@@ -43,9 +51,9 @@ z2   = ncread(file_midy, 'z_aac');
 nt = length(time);
 
 %% ---- Color limits ----
-Tlims    = [6 28];
-Slims    = [34 35.5];
-KElims   = [0 0.3];
+Tlims_sec    = [6 28];
+Slims_sec    = [34 35.5];
+KElims   = [0 0.15];
 VORTlims = [-4e-6 4e-6];
 
 %% ---- Video setup ----
@@ -135,7 +143,7 @@ for it = 1:nt
     %% ===============================
     ax3 = subplot(4,2,3);
     pcolor(x, y, Ssurf); shading flat
-    colormap(ax3, cmocean('haline')); caxis(Slims)
+    colormap(ax3, cmocean('haline')); caxis(Slims_sec)
     axis equal tight
     title('Surface Salinity','Color','w')
     xlabel('x (km)','Color','w'); ylabel('y (km)','Color','w')
@@ -144,7 +152,7 @@ for it = 1:nt
 
     ax4 = subplot(4,2,4);
     pcolor(x2, z2, Ssec); shading flat
-    colormap(ax4, cmocean('haline')); caxis(Slims)
+    colormap(ax4, cmocean('haline')); caxis(Slims_sec)
     axis tight
     title('Mid-y Salinity','Color','w')
     xlabel('x (km)','Color','w'); ylabel('Depth (m)','Color','w')
