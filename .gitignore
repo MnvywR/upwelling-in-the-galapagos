@@ -37,3 +37,5 @@ runs/real_bathymetry_beta_no_wind_20260707_175032_220/metadata.xlsx
 runs/real_bathymetry_no_beta_no_wind_20260707_175031_699/metadata.xlsx
 runs/real_bathymetry_beta_no_wind_20260707_175034_416/metadata.xlsx
 run_log.txt
+runs/real_bathymetry_no_beta_no_wind_20260707_175744_297/metadata.xlsx
+*.xlsx
