@@ -41,3 +41,9 @@ runs/real_bathymetry_no_beta_no_wind_20260707_175744_297/metadata.xlsx
 *.xlsx
 Upwelling_visualization.mp4
 *.mp4
+runs/real_bathymetry_beta_no_wind_20260801_170055_239/matlab_viz.log
+*.log
+last_step.m
+Galapagos_full_visualization.mp4
+upwelling_summary.png
+Galapagos_full_visualization.avi

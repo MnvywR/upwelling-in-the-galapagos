@@ -24,6 +24,7 @@ struct RunParameters
     H_S_flux::Int          # 0 = no flux, 1 = heat/salt flux diagnostics
     smoothing::Int         # 0 = raw bathymetry, 1 = gaussian smoothed
     EUC_model::Int         # 0 = constant forcing, 1 = fourier-based (not yet implemented)
+    EUC_value::Float64      # EUC velocity value (m/s)
     model_type::String     # "hydrostatic" or "nonhydrostatic"
 end
 
@@ -122,6 +123,7 @@ function run_simulation(p::RunParameters)
     H_S_flux             = p.H_S_flux
     Smoothing_bathymetry = p.smoothing
     EUC_model            = p.EUC_model
+    EUC_value            = p.EUC_value
     model_type           = p.model_type
 
     if wind == 0
@@ -180,7 +182,7 @@ function run_simulation(p::RunParameters)
         end
 
         depth = min.(depth, 0)
-        depth[(-10 .< depth) .& (depth .< 0)] .= 0
+        depth[(-30 .< depth) .& (depth .< 0)] .= 0
 
         Lx_real = (maximum(lon) - minimum(lon)) * 111e3
         Ly_real = (maximum(lat) - minimum(lat)) * 111e3
@@ -222,7 +224,7 @@ function run_simulation(p::RunParameters)
               N²₀ = 2e-4, σ = 40000.0seconds,
               u_b = 0.0, v_b = 0.0,
               EUC_model = EUC_model,
-              Umaxᵥ = 0.5, zₒᵥ = -75.0, yₒᵥ = 0.0, σ_zᵥ = 20.0, σ_yᵥ = 55600.0)
+              Umaxᵥ = EUC_value, zₒᵥ = -75.0, yₒᵥ = 0.0, σ_zᵥ = 20.0, σ_yᵥ = 55600.0)
 
     underlying_grid = RectilinearGrid(arch,
                         size = (params.Nx, params.Ny, params.Nz),
@@ -286,8 +288,7 @@ function run_simulation(p::RunParameters)
                     tracers = (:T, :S),
                     buoyancy = SeawaterBuoyancy(equation_of_state=LinearEquationOfState(
                         thermal_expansion = 3.87e-5, haline_contraction = 7.86e-4)),
-                    momentum_advection = WENO(),
-                    tracer_advection = WENO(),
+                    advection = WENO(),
                     coriolis = coriolis,
                     closure = closure,
                     forcing = forcing,
@@ -299,7 +300,7 @@ function run_simulation(p::RunParameters)
     @info "Model" model
 
     Δt₀ = 1/2 * minimum_yspacing(grid)
-    simulation = Simulation(model, Δt=Δt₀, stop_time = 365days)
+    simulation = Simulation(model, Δt=Δt₀, stop_time = 730days)
 
     wizard = TimeStepWizard(cfl=0.5, max_change=1.02, min_change=0.5)
     simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2))
@@ -388,7 +389,7 @@ function run_simulation(p::RunParameters)
         RunTag = run_tag, Timestamp = run_timestamp, OutputFolder = output_dir,
         ModelType = model_type, BathymetryMode = bathymetry_mode, Bathymetry = bathy_tag,
         Wind = wind, WindTag = windtag, BetaPlane = beta_switch, BetaTag = beta_tag,
-        EUCModel = EUC_model, HeatSaltFlux = H_S_flux, SmoothedBathymetry = Smoothing_bathymetry,
+        EUCModel = EUC_model, Umax = params.Umaxᵥ, HeatSaltFlux = H_S_flux, SmoothedBathymetry = Smoothing_bathymetry,
         InterpolatedIC = interpolated_IC, ExternalForcing = ext_forcing, Architecture = string(arch),
         Nx = params.Nx, Ny = params.Ny, Nz = params.Nz,
         Lx = params.Lx, Ly = params.Ly, Lz = params.Lz,
@@ -409,6 +410,8 @@ function run_simulation(p::RunParameters)
     end
     @info "Metadata written to $(metadata_filename)"
 
+
+
     common_fields = (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total)
 
     simulation.output_writers[:surface_slice_writer] = NetCDFWriter(model, common_fields;
@@ -421,30 +424,37 @@ function run_simulation(p::RunParameters)
         schedule = TimeInterval(8640seconds), indices = (:, Int(params.Ny/2), :),
         overwrite_existing = overwrite_existing)
 
+
+
+    simulation.stop_time = 100days
+    final_stop_time = 200days
+
+    run!(simulation)
+
     simulation.output_writers[:xy_75_depth_writer] = NetCDFWriter(model, common_fields;
         filename = joinpath(output_dir, "upwelling_75m.nc"),
-        schedule = TimeInterval(8640seconds), indices = (:, :, k_75m),
+        schedule = TimeInterval(86400seconds), indices = (:, :, k_75m),
         overwrite_existing = overwrite_existing)
 
     simulation.output_writers[:xy_150_depth_writer] = NetCDFWriter(model, common_fields;
         filename = joinpath(output_dir, "upwelling_150m.nc"),
-        schedule = TimeInterval(8640seconds), indices = (:, :, k_150m),
+        schedule = TimeInterval(86400seconds), indices = (:, :, k_150m),
         overwrite_existing = overwrite_existing)
 
     simulation.output_writers[:xy_225_depth_writer] = NetCDFWriter(model, common_fields;
         filename = joinpath(output_dir, "upwelling_225m.nc"),
-        schedule = TimeInterval(8640seconds), indices = (:, :, k_225m),
+        schedule = TimeInterval(86400seconds), indices = (:, :, k_225m),
         overwrite_existing = overwrite_existing)
 
     if H_S_flux == 1
         flux_fields = (; wT_difference, wS_difference, ∫wT_difference_up, ∫wS_difference_up)
         simulation.output_writers[:flux_writer_75] = NetCDFWriter(model, flux_fields;
             filename = joinpath(output_dir, "fluxes_75m.nc"),
-            schedule = TimeInterval(8640seconds), indices = (:, :, k_75m),
+            schedule = TimeInterval(86400seconds), indices = (:, :, k_75m),
             overwrite_existing = overwrite_existing)
         simulation.output_writers[:flux_writer_150] = NetCDFWriter(model, flux_fields;
             filename = joinpath(output_dir, "fluxes_150m.nc"),
-            schedule = TimeInterval(8640seconds), indices = (:, :, k_150m),
+            schedule = TimeInterval(86400seconds), indices = (:, :, k_150m),
             overwrite_existing = overwrite_existing)
         simulation.output_writers[:flux_writer_225] = NetCDFWriter(model, flux_fields;
             filename = joinpath(output_dir, "fluxes_225m.nc"),
@@ -462,7 +472,9 @@ function run_simulation(p::RunParameters)
         prefix = checkpointer_prefix,
         cleanup = true)
     =#
-    run!(simulation; pickup=false)
+    simulation.stop_time = final_stop_time   # whatever your real end time is
+    run!(simulation)
+
 
     return output_dir
 end
@@ -477,7 +489,7 @@ function build_master_metadata(rundir)
         file = joinpath(folder, "metadata.xlsx")
         if isfile(file)
             df = DataFrame(XLSX.readtable(file, "Metadata"))
-            append!(master, df)
+            append!(master, df; cols=:union)
         end
     end
     if isempty(master)

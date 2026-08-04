@@ -708,6 +708,8 @@
 
 
     #Below is the upwelling of different level depths (i.e., k_75m, k_150m, k_225m) and saving those outputs as netCDF files.
+    #Will need to change it to not being every 0.1 day (since that is a bit too frequent)
+    #Can also do it so it is just w and can do it so it only does it for the first thrity ish days (or something)
     simulation.output_writers[:xy_75_depth_writer] =
         NetCDFWriter(model, (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total); 
         filename = joinpath(output_dir, "upwelling_75m_$(bathy_tag)_$(windtag)_$(beta_tag)_$(run_timestamp)_GPU.nc"),
