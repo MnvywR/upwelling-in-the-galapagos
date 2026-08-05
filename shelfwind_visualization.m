@@ -272,5 +272,3 @@ end
 close(vid)
 %% ==========================================
 disp('Movie saved successfully.')
-
-

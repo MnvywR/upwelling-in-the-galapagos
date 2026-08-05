@@ -9,6 +9,9 @@ struct RunParameters
     EUC_model::Int         # 0 = constant forcing, 1 = fourier-based (not yet implemented)
     EUC_value::Float64      # EUC velocity value (m/s)
     model_type::String     # "hydrostatic" or "nonhydrostatic"
+    wind_speed::Float64      # NEW — m/s, used when wind == 1
+    wind_direction::Float64  # NEW — degrees, CCW from +x (east), direction wind blows TOWARD
+        to do NW, would do 135 degrees.
 end
 """
 
@@ -22,15 +25,22 @@ end
 using Distributed
 #Change in EUC values
 runs_config = [
-    (2, 0, 1, 0, 1, 0, 0.5, "nonhydrostatic"),
-    (2, 0, 1, 0, 1, 0, 0.1, "nonhydrostatic"),
-    (2, 0, 1, 0, 1, 0, 1.0, "nonhydrostatic"),
-    (2, 0, 1, 0, 1, 0, 2.0, "nonhydrostatic"),
+    #(2, 0, 1, 0, 1, 0, 0.5, "nonhydrostatic",0,0),
+    #(2, 0, 1, 0, 1, 0, 0.1, "nonhydrostatic",0,0),
+    #(2, 0, 1, 0, 1, 0, 1.0, "nonhydrostatic",0,0),
+    #(2, 0, 1, 0, 1, 0, 2.0, "nonhydrostatic",0,0),
     #island variation
-    (0, 0, 1, 0, 1, 0, 0.5, "nonhydrostatic"),
-    (1, 0, 1, 0, 1, 0, 0.5, "nonhydrostatic"),
+    #(0, 0, 1, 0, 1, 0, 0.5, "nonhydrostatic",0,0),
+    #(1, 0, 1, 0, 1, 0, 0.5, "nonhydrostatic",0,0),
     #Beta plane variation
-    (2, 0, 0, 0, 1, 0, 0.5, "nonhydrostatic"),
+    #(2, 0, 0, 0, 1, 0, 0.5, "nonhydrostatic",0,0),
+
+    #Just wind variation from baseline
+    (2, 1, 1, 0, 1, 0, 0.5, "nonhydrostatic",1.0,135.0),
+    (2, 1, 1, 0, 1, 0, 0.5, "nonhydrostatic",2.0,135.0),
+    (2, 1, 1, 0, 1, 0, 0.5, "nonhydrostatic",3.0,135.0),
+    (2, 1, 1, 0, 1, 0, 0.5, "nonhydrostatic",4.0,135.0),
+    (2, 1, 1, 0, 1, 0, 0.5, "nonhydrostatic",5.0,135.0),
 
     ]
 

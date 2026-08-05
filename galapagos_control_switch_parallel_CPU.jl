@@ -19,13 +19,15 @@ using XLSX
 #-------------------------------------------------------------------------------------
 struct RunParameters
     bathymetry_mode::Int   # 0 = No bathymetry, 1 = Gaussian bathymetry, 2 = Real bathymetry
-    wind::Int              # 0 = no wind, 1 = wind from 4-year netCDF
+    wind::Int              # 0 = no wind, 1 = const wind data
     beta_switch::Int       # 0 = no beta, 1 = beta plane
     H_S_flux::Int          # 0 = no flux, 1 = heat/salt flux diagnostics
     smoothing::Int         # 0 = raw bathymetry, 1 = gaussian smoothed
     EUC_model::Int         # 0 = constant forcing, 1 = fourier-based (not yet implemented)
     EUC_value::Float64      # EUC velocity value (m/s)
     model_type::String     # "hydrostatic" or "nonhydrostatic"
+    wind_speed::Float64      # NEW — m/s, used when wind == 2
+    wind_direction::Float64  # NEW — degrees, CCW from +x (east), direction wind blows TOWARD
 end
 
 #-------------------------------------------------------------------------------------
@@ -126,16 +128,16 @@ function run_simulation(p::RunParameters)
     EUC_value            = p.EUC_value
     model_type           = p.model_type
 
+u_b, v_b = 0.0, 0.0   # wind velocity components (m/s)
+
     if wind == 0
         @info "no wind being used"
+
     elseif wind == 1
-        @info "loading four years of wind data from netCDF file"
-        ds = NCDataset("wind_data_4_years.nc")
-        u10 = ds["u10_reg"][:]
-        v10 = ds["v10_reg"][:]
-        lat1 = ds["lat"][:]
-        lon1 = ds["lon"][:]
-        close(ds)
+        @info "using constant $(p.wind_speed) m/s wind from direction $(p.wind_direction)°"
+        θ = deg2rad(p.wind_direction)
+        u_b = p.wind_speed * cos(θ)
+        v_b = p.wind_speed * sin(θ)
     end
 
     rundir = @__DIR__
@@ -221,8 +223,8 @@ function run_simulation(p::RunParameters)
 
     params = (; Lx = Lx_real, Ly = Ly_real, Lz = Lz,
               Nx = 30, Ny = 30, Nz = 30,
-              N²₀ = 2e-4, σ = 40000.0seconds,
-              u_b = 0.0, v_b = 0.0,
+              N²₀ = 2e-4, σ = 30days,
+              u_b = u_b, v_b = v_b,
               EUC_model = EUC_model,
               Umaxᵥ = EUC_value, zₒᵥ = -75.0, yₒᵥ = 0.0, σ_zᵥ = 20.0, σ_yᵥ = 55600.0)
 
@@ -240,8 +242,11 @@ function run_simulation(p::RunParameters)
     cᴰ = 2.5e-3
     ρₐ = 1.225
     ρₒ = 1028
-    Qu = -ρₐ / ρₒ * cᴰ * params.u_b * abs(params.u_b)
-    Qv = -ρₐ / ρₒ * cᴰ * params.v_b * abs(params.v_b)
+
+    #Wind stress computation
+    wind_mag = sqrt(params.u_b^2 + params.v_b^2)
+    Qu = -ρₐ / ρₒ * cᴰ * wind_mag * params.u_b
+    Qv = -ρₐ / ρₒ * cᴰ * wind_mag * params.v_b
 
     FT = Forcing(sponge_T, discrete_form=true, parameters=params)
     FS = Forcing(sponge_S, discrete_form=true, parameters=params)
@@ -250,8 +255,8 @@ function run_simulation(p::RunParameters)
 
     T_bcs = FieldBoundaryConditions()
     S_bcs = FieldBoundaryConditions()
-    u_bcs = FieldBoundaryConditions()
-    v_bcs = FieldBoundaryConditions()
+    u_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qu))  
+    v_bcs = FieldBoundaryConditions(top = FluxBoundaryCondition(Qv))   
     w_bcs = FieldBoundaryConditions()
     boundary_conditions = (u=u_bcs, v=v_bcs, w=w_bcs, T=T_bcs, S=S_bcs)
 
@@ -299,8 +304,13 @@ function run_simulation(p::RunParameters)
 
     @info "Model" model
 
+    #
+    initial_stop_time = 100days   # phase 1 ends here — upwelling writers get added after this
+    final_stop_time   = 200days   # grand total run length
+
+
     Δt₀ = 1/2 * minimum_yspacing(grid)
-    simulation = Simulation(model, Δt=Δt₀, stop_time = 730days)
+    simulation = Simulation(model, Δt=Δt₀, stop_time = initial_stop_time)
 
     wizard = TimeStepWizard(cfl=0.5, max_change=1.02, min_change=0.5)
     simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(2))
@@ -415,19 +425,16 @@ function run_simulation(p::RunParameters)
     common_fields = (; u, v, w, T, S, vorticity_z, KE_u, KE_v, KE_w, KE_total)
 
     simulation.output_writers[:surface_slice_writer] = NetCDFWriter(model, common_fields;
-        filename = joinpath(output_dir, "top_.nc"),
-        schedule = TimeInterval(8640seconds), indices = (:, :, params.Nz),
+        filename = joinpath(output_dir, "top_xy.nc"),
+        schedule = TimeInterval(86400seconds), indices = (:, :, params.Nz),
         overwrite_existing = overwrite_existing)
 
     simulation.output_writers[:y_slice_writer] = NetCDFWriter(model, common_fields;
         filename = joinpath(output_dir, "midy.nc"),
-        schedule = TimeInterval(8640seconds), indices = (:, Int(params.Ny/2), :),
+        schedule = TimeInterval(86400seconds), indices = (:, Int(params.Ny/2), :),
         overwrite_existing = overwrite_existing)
 
 
-
-    simulation.stop_time = 100days
-    final_stop_time = 200days
 
     run!(simulation)
 
@@ -458,7 +465,7 @@ function run_simulation(p::RunParameters)
             overwrite_existing = overwrite_existing)
         simulation.output_writers[:flux_writer_225] = NetCDFWriter(model, flux_fields;
             filename = joinpath(output_dir, "fluxes_225m.nc"),
-            schedule = TimeInterval(8640seconds), indices = (:, :, k_225m),
+            schedule = TimeInterval(86400seconds), indices = (:, :, k_225m),
             overwrite_existing = overwrite_existing)
     end
 
